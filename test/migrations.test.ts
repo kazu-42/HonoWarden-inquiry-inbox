@@ -8,6 +8,10 @@ const replyMigration = readFileSync(
   "utf8",
 );
 const aiMigration = readFileSync("migrations/0003_ai_triage.sql", "utf8");
+const linearMigration = readFileSync(
+  "migrations/0004_linear_links.sql",
+  "utf8",
+);
 
 describe("inquiry mailbox migration", () => {
   it("creates metadata, message, and event tables", () => {
@@ -72,5 +76,20 @@ describe("inquiry mailbox migration", () => {
     expect(aiMigration).not.toContain("raw_body");
     expect(aiMigration).not.toContain("api_key");
     expect(aiMigration).not.toContain("token TEXT");
+  });
+
+  it("adds redacted Linear issue link records without token storage", () => {
+    expect(linearMigration).toContain(
+      "CREATE TABLE IF NOT EXISTS inquiry_linear_links",
+    );
+    expect(linearMigration).toContain("redacted_summary TEXT NOT NULL");
+    expect(linearMigration).toContain("linear_issue_url TEXT");
+    expect(linearMigration).toContain("UNIQUE(thread_id)");
+    expect(linearMigration).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_inquiry_linear_links_status_updated",
+    );
+    expect(linearMigration).not.toContain("api_key");
+    expect(linearMigration).not.toContain("token");
+    expect(linearMigration).not.toContain("raw_body");
   });
 });

@@ -115,6 +115,56 @@ export type InquiryAiRunInput = {
   createdAt: string;
 };
 
+export type InquiryLinearLinkInput = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  status: InquiryLinearLinkStatus;
+  mailbox: string;
+  title: string;
+  redactedSummary: string;
+  linearIssueId: string | null;
+  linearIssueIdentifier: string | null;
+  linearIssueUrl: string | null;
+  createdBy: string;
+  approvedBy: string | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InquiryLinearLinkStatus = "draft" | "created" | "failed";
+
+export type InquiryLinearLinkRecord = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  status: InquiryLinearLinkStatus;
+  mailbox: string;
+  title: string;
+  redactedSummary: string;
+  linearIssueId: string | null;
+  linearIssueIdentifier: string | null;
+  linearIssueUrl: string | null;
+};
+
+export type InquiryLinearLinkCreatedUpdateInput = {
+  id: string;
+  status: "created";
+  linearIssueId: string;
+  linearIssueIdentifier: string;
+  linearIssueUrl: string;
+  approvedBy: string;
+  updatedAt: string;
+};
+
+export type InquiryLinearLinkFailedUpdateInput = {
+  id: string;
+  lastErrorCode: string;
+  approvedBy: string;
+  updatedAt: string;
+};
+
 type InquiryDatabase = Pick<D1Database, "prepare">;
 
 export async function upsertInquiryThread(
@@ -453,6 +503,147 @@ export async function recordInquiryAiRun(
     .run();
 }
 
+export async function getInquiryLinearLinkByThread(
+  database: InquiryDatabase,
+  threadId: string,
+): Promise<InquiryLinearLinkRecord | null> {
+  const row = await database
+    .prepare(
+      `
+        SELECT
+          id,
+          thread_id,
+          message_id,
+          status,
+          mailbox,
+          title,
+          redacted_summary,
+          linear_issue_id,
+          linear_issue_identifier,
+          linear_issue_url
+        FROM inquiry_linear_links
+        WHERE thread_id = ?
+      `,
+    )
+    .bind(threadId)
+    .first<InquiryLinearLinkRow>();
+
+  return row ? mapInquiryLinearLink(row) : null;
+}
+
+export async function recordInquiryLinearLink(
+  database: InquiryDatabase,
+  input: InquiryLinearLinkInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_linear_links (
+          id,
+          thread_id,
+          message_id,
+          status,
+          mailbox,
+          title,
+          redacted_summary,
+          linear_issue_id,
+          linear_issue_identifier,
+          linear_issue_url,
+          created_by,
+          approved_by,
+          last_error_code,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .bind(
+      input.id,
+      input.threadId,
+      input.messageId,
+      input.status,
+      input.mailbox,
+      input.title,
+      input.redactedSummary,
+      input.linearIssueId,
+      input.linearIssueIdentifier,
+      input.linearIssueUrl,
+      input.createdBy,
+      input.approvedBy,
+      input.lastErrorCode,
+      input.createdAt,
+      input.updatedAt,
+    )
+    .run();
+}
+
+export async function updateInquiryLinearLinkCreated(
+  database: InquiryDatabase,
+  input: InquiryLinearLinkCreatedUpdateInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        UPDATE inquiry_linear_links SET
+          status = ?,
+          linear_issue_id = ?,
+          linear_issue_identifier = ?,
+          linear_issue_url = ?,
+          approved_by = ?,
+          last_error_code = NULL,
+          updated_at = ?
+        WHERE id = ?
+      `,
+    )
+    .bind(
+      input.status,
+      input.linearIssueId,
+      input.linearIssueIdentifier,
+      input.linearIssueUrl,
+      input.approvedBy,
+      input.updatedAt,
+      input.id,
+    )
+    .run();
+}
+
+export async function updateInquiryLinearLinkFailed(
+  database: InquiryDatabase,
+  input: InquiryLinearLinkFailedUpdateInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        UPDATE inquiry_linear_links SET
+          status = 'failed',
+          approved_by = ?,
+          last_error_code = ?,
+          updated_at = ?
+        WHERE id = ?
+      `,
+    )
+    .bind(input.approvedBy, input.lastErrorCode, input.updatedAt, input.id)
+    .run();
+}
+
+function mapInquiryLinearLink(
+  row: InquiryLinearLinkRow,
+): InquiryLinearLinkRecord {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    messageId: row.message_id,
+    status: row.status,
+    mailbox: row.mailbox,
+    title: row.title,
+    redactedSummary: row.redacted_summary,
+    linearIssueId: row.linear_issue_id,
+    linearIssueIdentifier: row.linear_issue_identifier,
+    linearIssueUrl: row.linear_issue_url,
+  };
+}
+
 type InquiryDraftRow = {
   id: string;
   thread_id: string;
@@ -465,4 +656,17 @@ type InquiryDraftRow = {
   text_body: string;
   in_reply_to_hash: string | null;
   references_hash: string | null;
+};
+
+type InquiryLinearLinkRow = {
+  id: string;
+  thread_id: string;
+  message_id: string | null;
+  status: InquiryLinearLinkStatus;
+  mailbox: string;
+  title: string;
+  redacted_summary: string;
+  linear_issue_id: string | null;
+  linear_issue_identifier: string | null;
+  linear_issue_url: string | null;
 };
