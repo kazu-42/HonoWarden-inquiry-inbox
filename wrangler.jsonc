@@ -11,6 +11,7 @@
     "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
     "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
     "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+    "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
   },
   "d1_databases": [
     {
@@ -46,6 +47,7 @@
         "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
         "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
         "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+        "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
       },
       "d1_databases": [
         {
@@ -81,6 +83,7 @@
         "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
         "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
         "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+        "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
       },
       "d1_databases": [
         {

@@ -89,9 +89,30 @@ export type InquiryDraftStatusUpdateInput = {
 
 export type InquiryDraftContentUpdateInput = {
   id: string;
+  toAddress: string;
+  toAddressHash: string;
+  fromAddress: string;
+  replyToAddress: string;
   subject: string;
   textBody: string;
   updatedAt: string;
+};
+
+export type InquiryAiRunInput = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  draftId: string | null;
+  promptVersion: string;
+  modelId: string;
+  redactedContextJson: string;
+  classification: string;
+  confidence: number;
+  recommendedAction: string;
+  requiresHumanApproval: boolean;
+  toolCallsJson: string;
+  createdBy: string;
+  createdAt: string;
 };
 
 type InquiryDatabase = Pick<D1Database, "prepare">;
@@ -363,6 +384,10 @@ export async function updateInquiryDraftContent(
     .prepare(
       `
         UPDATE inquiry_drafts SET
+          to_address = ?,
+          to_address_hash = ?,
+          from_address = ?,
+          reply_to_address = ?,
           subject = ?,
           text_body = ?,
           updated_at = ?
@@ -370,7 +395,61 @@ export async function updateInquiryDraftContent(
         AND status = 'draft'
       `,
     )
-    .bind(input.subject, input.textBody, input.updatedAt, input.id)
+    .bind(
+      input.toAddress,
+      input.toAddressHash,
+      input.fromAddress,
+      input.replyToAddress,
+      input.subject,
+      input.textBody,
+      input.updatedAt,
+      input.id,
+    )
+    .run();
+}
+
+export async function recordInquiryAiRun(
+  database: InquiryDatabase,
+  input: InquiryAiRunInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_ai_runs (
+          id,
+          thread_id,
+          message_id,
+          draft_id,
+          prompt_version,
+          model_id,
+          redacted_context_json,
+          classification,
+          confidence,
+          recommended_action,
+          requires_human_approval,
+          tool_calls_json,
+          created_by,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .bind(
+      input.id,
+      input.threadId,
+      input.messageId,
+      input.draftId,
+      input.promptVersion,
+      input.modelId,
+      input.redactedContextJson,
+      input.classification,
+      input.confidence,
+      input.recommendedAction,
+      input.requiresHumanApproval ? 1 : 0,
+      input.toolCallsJson,
+      input.createdBy,
+      input.createdAt,
+    )
     .run();
 }
 
