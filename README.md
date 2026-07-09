@@ -21,12 +21,14 @@ encrypted vault payloads.
 - Run redaction-first inquiry triage and draft suggestion generation without
   autonomous external writes.
 - Require a human to replace AI placeholder recipients before approval or send.
+- Prepare redacted Linear issue links and create Linear issues only after an
+  explicit operator-approved request.
 - Never commit message bodies, attachment contents, private forwarding
   destinations, or mailbox contents to git.
 
-Autonomous sending, live AI provider invocation, and Linear issue creation are
-separate follow-up phases. Live outbound sends require a separate operator
-approval and evidence record.
+Autonomous sending, live AI provider invocation, and autonomous Linear writes
+remain out of scope. Live outbound sends and Linear issue creation require a
+separate operator approval and evidence record.
 
 ## References
 
@@ -38,3 +40,10 @@ approval and evidence record.
   <https://github.com/cloudflare/agentic-inbox>
 - Field report referenced by the HonoWarden operator:
   <https://blog.sh1ma.dev/articles/20260706_cloudflare_agentic_inbox/>
+
+## Evidence
+
+- [HON-24 Inquiry Mailbox Storage Evidence](docs/hon-24-evidence.md)
+- [HON-25 Human-Approved Reply Evidence](docs/hon-25-evidence.md)
+- [HON-26 AI Triage And Draft Evidence](docs/hon-26-evidence.md)
+- [HON-27 Linear Issue Workflow Evidence](docs/hon-27-evidence.md)

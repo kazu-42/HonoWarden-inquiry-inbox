@@ -1,5 +1,6 @@
 import { createAiTriageRun, pendingTriageRecipient } from "./ai-triage";
 import type { InquiryBindings } from "./bindings";
+import { createLinearIssueWorkflow } from "./linear-issues";
 import {
   getInquiryDraft,
   recordInquiryDraft,
@@ -23,6 +24,15 @@ export async function handleInquiryHttpRequest(
 
   if (url.pathname === "/api/triage-runs" && request.method === "POST") {
     return createAiTriageRun(request, env, now);
+  }
+
+  if (url.pathname === "/api/linear-issues" && request.method === "POST") {
+    const operator = resolveOperatorIdentity(request);
+    if (!operator) {
+      return jsonResponse({ error: "operator_identity_required" }, 401);
+    }
+
+    return createLinearIssueWorkflow(request, env, operator, now);
   }
 
   const draftMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)$/);

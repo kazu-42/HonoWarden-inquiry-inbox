@@ -8,6 +8,10 @@ export type InquiryBindings = {
   HONOWARDEN_INQUIRY_MAILBOXES?: string;
   HONOWARDEN_INQUIRY_MAX_BYTES?: string;
   HONOWARDEN_INQUIRY_RETENTION_DAYS?: string;
+  HONOWARDEN_LINEAR_API_URL?: string;
+  HONOWARDEN_LINEAR_DEFAULT_LABEL_IDS?: string;
+  HONOWARDEN_LINEAR_PROJECT_ID?: string;
+  HONOWARDEN_LINEAR_TEAM_ID?: string;
   HONOWARDEN_ABUSE_FORWARD_TO?: string;
   HONOWARDEN_ADMIN_FORWARD_TO?: string;
   HONOWARDEN_GENERAL_FORWARD_TO?: string;
@@ -15,6 +19,7 @@ export type InquiryBindings = {
   HONOWARDEN_POSTMASTER_FORWARD_TO?: string;
   HONOWARDEN_SECURITY_FORWARD_TO?: string;
   HONOWARDEN_SUPPORT_FORWARD_TO?: string;
+  LINEAR_API_KEY?: string;
 };
 
 export const defaultInquiryMailboxes = [
