@@ -7,6 +7,7 @@ const replyMigration = readFileSync(
   "migrations/0002_inquiry_replies.sql",
   "utf8",
 );
+const aiMigration = readFileSync("migrations/0003_ai_triage.sql", "utf8");
 
 describe("inquiry mailbox migration", () => {
   it("creates metadata, message, and event tables", () => {
@@ -57,5 +58,19 @@ describe("inquiry mailbox migration", () => {
     );
     expect(replyMigration).not.toContain("api_key");
     expect(replyMigration).not.toContain("token");
+  });
+
+  it("adds redacted AI triage run metadata", () => {
+    expect(aiMigration).toContain("CREATE TABLE IF NOT EXISTS inquiry_ai_runs");
+    expect(aiMigration).toContain("redacted_context_json TEXT NOT NULL");
+    expect(aiMigration).toContain("classification TEXT NOT NULL");
+    expect(aiMigration).toContain("confidence REAL NOT NULL");
+    expect(aiMigration).toContain("tool_calls_json TEXT NOT NULL");
+    expect(aiMigration).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_inquiry_ai_runs_thread_created",
+    );
+    expect(aiMigration).not.toContain("raw_body");
+    expect(aiMigration).not.toContain("api_key");
+    expect(aiMigration).not.toContain("token TEXT");
   });
 });

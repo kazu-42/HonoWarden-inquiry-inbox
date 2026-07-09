@@ -1,3 +1,4 @@
+import { createAiTriageRun, pendingTriageRecipient } from "./ai-triage";
 import type { InquiryBindings } from "./bindings";
 import {
   getInquiryDraft,
@@ -18,6 +19,10 @@ export async function handleInquiryHttpRequest(
 
   if (url.pathname === "/api/drafts" && request.method === "POST") {
     return createDraft(request, env, now);
+  }
+
+  if (url.pathname === "/api/triage-runs" && request.method === "POST") {
+    return createAiTriageRun(request, env, now);
   }
 
   const draftMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)$/);
@@ -156,16 +161,30 @@ async function editDraft(
   const body = await readJsonObject(request);
   const subject = requiredString(body.subject);
   const text = requiredString(body.text);
+  const to = optionalEmail(body.to);
+  const from = optionalHonowardenEmail(body.from);
   if (!subject) {
     return jsonResponse({ error: "invalid_subject" }, 400);
   }
   if (!text) {
     return jsonResponse({ error: "invalid_text" }, 400);
   }
+  if (body.to !== undefined && !to) {
+    return jsonResponse({ error: "invalid_to" }, 400);
+  }
+  if (body.from !== undefined && !from) {
+    return jsonResponse({ error: "invalid_from" }, 400);
+  }
 
   const updatedAt = now.toISOString();
+  const toAddress = to ?? draft.toAddress;
+  const fromAddress = from ?? draft.fromAddress;
   await updateInquiryDraftContent(env.INQUIRY_DB, {
     id: draft.id,
+    toAddress,
+    toAddressHash: await sha256Hex(toAddress),
+    fromAddress,
+    replyToAddress: buildReplyToAddress(fromAddress, draft.threadId),
     subject,
     textBody: text,
     updatedAt,
@@ -206,6 +225,9 @@ async function decideDraft(
   }
   if (draft.status !== "draft") {
     return jsonResponse({ error: "draft_not_reviewable" }, 409);
+  }
+  if (decision === "approve" && draft.toAddress === pendingTriageRecipient) {
+    return jsonResponse({ error: "draft_recipient_required" }, 409);
   }
 
   const status = decision === "approve" ? "approved" : "rejected";
@@ -254,6 +276,9 @@ async function sendDraft(
   }
   if (draft.status !== "approved") {
     return jsonResponse({ error: "draft_not_approved" }, 409);
+  }
+  if (draft.toAddress === pendingTriageRecipient) {
+    return jsonResponse({ error: "draft_recipient_required" }, 409);
   }
 
   const sentAt = now.toISOString();
@@ -419,9 +444,19 @@ function requiredEmail(value: unknown): string | null {
   return text && text.includes("@") ? text : null;
 }
 
+function optionalEmail(value: unknown): string | null {
+  return value === null || value === undefined ? null : requiredEmail(value);
+}
+
 function requiredHonowardenEmail(value: unknown): string | null {
   const text = requiredEmail(value);
   return text?.endsWith("@honowarden.com") ? text : null;
+}
+
+function optionalHonowardenEmail(value: unknown): string | null {
+  return value === null || value === undefined
+    ? null
+    : requiredHonowardenEmail(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

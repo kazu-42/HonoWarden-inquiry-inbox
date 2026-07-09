@@ -84,6 +84,8 @@ describe("human-approved inquiry replies", () => {
         {
           subject: "Re: Updated support",
           text: "updated reply body",
+          to: "updated-reporter@example.test",
+          from: "hello@honowarden.com",
         },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
         "PATCH",
@@ -102,7 +104,13 @@ describe("human-approved inquiry replies", () => {
       },
     });
     expect(JSON.stringify(payload)).not.toContain("updated reply body");
+    expect(JSON.stringify(payload)).not.toContain(
+      "updated-reporter@example.test",
+    );
     expect(database.queries.join("\n")).toContain("UPDATE inquiry_drafts SET");
+    expect(database.boundValues).toContain("updated-reporter@example.test");
+    expect(database.boundValues).toContain("hello@honowarden.com");
+    expect(database.boundValues).toContain("hello+thread_1@honowarden.com");
     expect(database.boundValues).toContain("Re: Updated support");
     expect(database.boundValues).toContain("updated reply body");
   });
@@ -168,6 +176,78 @@ describe("human-approved inquiry replies", () => {
     expect(approvalDatabase.boundValues).toContain("approver@example.test");
     expect(rejectionDatabase.boundValues).toContain("rejected");
     expect(rejectionDatabase.boundValues).toContain("reviewer@example.test");
+  });
+
+  it("blocks approval and sending until AI draft recipients are replaced", async () => {
+    const pendingRecipient = "pending-recipient@redacted.invalid";
+    const approvalDatabase = new RecordingD1Database({
+      id: "draft_ai",
+      thread_id: "thread_1",
+      message_id: "message_1",
+      status: "draft",
+      to_address: pendingRecipient,
+      from_address: "security@honowarden.com",
+      reply_to_address: "security+thread_1@honowarden.com",
+      subject: "Re: Security",
+      text_body: "suggested reply",
+      in_reply_to_hash: null,
+      references_hash: null,
+    });
+    const sendDatabase = new RecordingD1Database({
+      id: "draft_ai",
+      thread_id: "thread_1",
+      message_id: "message_1",
+      status: "approved",
+      to_address: pendingRecipient,
+      from_address: "security@honowarden.com",
+      reply_to_address: "security+thread_1@honowarden.com",
+      subject: "Re: Security",
+      text_body: "suggested reply",
+      in_reply_to_hash: null,
+      references_hash: null,
+    });
+    const sentMessages: unknown[] = [];
+
+    const approval = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_ai/approve",
+        {},
+        { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
+      ),
+      {
+        INQUIRY_DB: approvalDatabase as unknown as D1Database,
+      } as InquiryBindings,
+    );
+    const send = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_ai/send",
+        {},
+        { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
+      ),
+      {
+        INQUIRY_DB: sendDatabase as unknown as D1Database,
+        EMAIL: {
+          async send(message: unknown): Promise<unknown> {
+            sentMessages.push(message);
+            return { success: true };
+          },
+        } as InquiryBindings["EMAIL"],
+      } as InquiryBindings,
+    );
+
+    expect(approval.status).toBe(409);
+    expect(await approval.json()).toEqual({
+      error: "draft_recipient_required",
+    });
+    expect(send.status).toBe(409);
+    expect(await send.json()).toEqual({ error: "draft_recipient_required" });
+    expect(sentMessages).toEqual([]);
+    expect(approvalDatabase.queries.join("\n")).not.toContain(
+      "UPDATE inquiry_drafts SET",
+    );
+    expect(sendDatabase.queries.join("\n")).not.toContain(
+      "UPDATE inquiry_drafts SET",
+    );
   });
 
   it("sends only approved drafts through the Email Service binding", async () => {
