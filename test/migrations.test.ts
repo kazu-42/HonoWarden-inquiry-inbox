@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync("migrations/0001_inquiry_mailbox.sql", "utf8");
+const replyMigration = readFileSync(
+  "migrations/0002_inquiry_replies.sql",
+  "utf8",
+);
 
 describe("inquiry mailbox migration", () => {
   it("creates metadata, message, and event tables", () => {
@@ -36,5 +40,22 @@ describe("inquiry mailbox migration", () => {
     ]) {
       expect(migration).toContain(`CREATE INDEX IF NOT EXISTS ${indexName}`);
     }
+  });
+
+  it("adds human-approved reply drafts without API key columns", () => {
+    expect(replyMigration).toContain(
+      "CREATE TABLE IF NOT EXISTS inquiry_drafts",
+    );
+    expect(replyMigration).toContain(
+      "status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'rejected', 'sent', 'send_failed'))",
+    );
+    expect(replyMigration).toContain("approved_by TEXT");
+    expect(replyMigration).toContain("sent_at TEXT");
+    expect(replyMigration).toContain("provider_message_id_hash TEXT");
+    expect(replyMigration).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_inquiry_drafts_thread_updated",
+    );
+    expect(replyMigration).not.toContain("api_key");
+    expect(replyMigration).not.toContain("token");
   });
 });
