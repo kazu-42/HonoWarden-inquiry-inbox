@@ -1,0 +1,74 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "honowarden-inquiry-inbox",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-09",
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "HONOWARDEN_INQUIRY_ENV": "development",
+    "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
+    "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
+    "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+  },
+  "d1_databases": [
+    {
+      "binding": "INQUIRY_DB",
+      "database_name": "honowarden-inquiry",
+      "database_id": "00aa46fa-057c-4409-b344-6fa3b61c00dc",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "INQUIRY_OBJECTS",
+      "bucket_name": "honowarden-inquiry-objects",
+    },
+  ],
+  "env": {
+    "staging": {
+      "name": "honowarden-inquiry-inbox-staging",
+      "vars": {
+        "HONOWARDEN_INQUIRY_ENV": "staging",
+        "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
+        "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
+        "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+      },
+      "d1_databases": [
+        {
+          "binding": "INQUIRY_DB",
+          "database_name": "honowarden-inquiry-staging",
+          "database_id": "73912ec8-7da4-4e1e-85c8-09ce9c177f9f",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "INQUIRY_OBJECTS",
+          "bucket_name": "honowarden-inquiry-staging-objects",
+        },
+      ],
+    },
+    "production": {
+      "name": "honowarden-inquiry-inbox",
+      "vars": {
+        "HONOWARDEN_INQUIRY_ENV": "production",
+        "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
+        "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
+        "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
+      },
+      "d1_databases": [
+        {
+          "binding": "INQUIRY_DB",
+          "database_name": "honowarden-inquiry",
+          "database_id": "00aa46fa-057c-4409-b344-6fa3b61c00dc",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "INQUIRY_OBJECTS",
+          "bucket_name": "honowarden-inquiry-objects",
+        },
+      ],
+    },
+  },
+}

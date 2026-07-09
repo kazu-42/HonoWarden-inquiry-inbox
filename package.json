@@ -1,0 +1,38 @@
+{
+  "name": "honowarden-inquiry-inbox",
+  "version": "0.1.0-alpha",
+  "description": "Cloudflare Worker inbox for HonoWarden inbound project inquiries.",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "private": false,
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typegen": "wrangler types"
+  },
+  "dependencies": {
+    "postal-mime": "^2.6.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.0",
+    "eslint": "^10.6.0",
+    "prettier": "^3.9.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.107.0"
+  }
+}

@@ -1,0 +1,176 @@
+export type InquiryThreadInput = {
+  id: string;
+  mailbox: string;
+  threadKey: string;
+  sender: string;
+  senderHash: string;
+  subject: string | null;
+  retentionDeleteAfter: string;
+  latestMessageAt: string;
+  now: string;
+};
+
+export type InquiryMessageInput = {
+  id: string;
+  threadId: string;
+  mailbox: string;
+  direction: "inbound" | "outbound";
+  envelopeSender: string;
+  envelopeSenderHash: string;
+  envelopeRecipient: string;
+  headerMetadataJson: string;
+  messageIdHash: string | null;
+  subject: string | null;
+  receivedAt: string;
+  rawSizeBytes: number;
+  bodyMetadataJson: string;
+  attachmentCount: number;
+  attachmentPolicy: string;
+  rawStorageState: string;
+  rawR2Key: string | null;
+  deliveryStatus: string;
+  retentionDeleteAfter: string;
+  createdAt: string;
+};
+
+export type InquiryEventInput = {
+  id: string;
+  threadId: string | null;
+  messageId: string | null;
+  eventType: string;
+  status: string;
+  metadataJson: string;
+  occurredAt: string;
+};
+
+type InquiryDatabase = Pick<D1Database, "prepare">;
+
+export async function upsertInquiryThread(
+  database: InquiryDatabase,
+  input: InquiryThreadInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_threads (
+          id,
+          mailbox,
+          thread_key,
+          sender,
+          sender_hash,
+          subject,
+          retention_delete_after,
+          latest_message_at,
+          message_count,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(mailbox, thread_key) DO UPDATE SET
+          latest_message_at = excluded.latest_message_at,
+          message_count = inquiry_threads.message_count + 1,
+          updated_at = excluded.updated_at
+      `,
+    )
+    .bind(
+      input.id,
+      input.mailbox,
+      input.threadKey,
+      input.sender,
+      input.senderHash,
+      input.subject,
+      input.retentionDeleteAfter,
+      input.latestMessageAt,
+      input.now,
+      input.now,
+    )
+    .run();
+}
+
+export async function recordInquiryMessage(
+  database: InquiryDatabase,
+  input: InquiryMessageInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_messages (
+          id,
+          thread_id,
+          mailbox,
+          direction,
+          envelope_sender,
+          envelope_sender_hash,
+          envelope_recipient,
+          header_metadata_json,
+          message_id_hash,
+          subject,
+          received_at,
+          raw_size_bytes,
+          body_metadata_json,
+          attachment_count,
+          attachment_policy,
+          raw_storage_state,
+          raw_r2_key,
+          delivery_status,
+          retention_delete_after,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .bind(
+      input.id,
+      input.threadId,
+      input.mailbox,
+      input.direction,
+      input.envelopeSender,
+      input.envelopeSenderHash,
+      input.envelopeRecipient,
+      input.headerMetadataJson,
+      input.messageIdHash,
+      input.subject,
+      input.receivedAt,
+      input.rawSizeBytes,
+      input.bodyMetadataJson,
+      input.attachmentCount,
+      input.attachmentPolicy,
+      input.rawStorageState,
+      input.rawR2Key,
+      input.deliveryStatus,
+      input.retentionDeleteAfter,
+      input.createdAt,
+    )
+    .run();
+}
+
+export async function recordInquiryEvent(
+  database: InquiryDatabase,
+  input: InquiryEventInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_events (
+          id,
+          thread_id,
+          message_id,
+          event_type,
+          status,
+          metadata_json,
+          occurred_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .bind(
+      input.id,
+      input.threadId,
+      input.messageId,
+      input.eventType,
+      input.status,
+      input.metadataJson,
+      input.occurredAt,
+    )
+    .run();
+}
