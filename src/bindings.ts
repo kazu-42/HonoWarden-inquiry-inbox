@@ -1,5 +1,6 @@
 export type InquiryBindings = {
   INQUIRY_DB: D1Database;
+  EMAIL?: SendEmail;
   INQUIRY_OBJECTS?: R2Bucket;
   HONOWARDEN_INQUIRY_ENV?: string;
   HONOWARDEN_INQUIRY_FORWARD_TO?: string;

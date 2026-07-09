@@ -43,6 +43,57 @@ export type InquiryEventInput = {
   occurredAt: string;
 };
 
+export type InquiryDraftInput = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  status: InquiryDraftStatus;
+  toAddress: string;
+  toAddressHash: string;
+  fromAddress: string;
+  replyToAddress: string;
+  subject: string;
+  textBody: string;
+  inReplyToHash: string | null;
+  referencesHash: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InquiryDraftStatus =
+  "draft" | "approved" | "rejected" | "sent" | "send_failed";
+
+export type InquiryDraftRecord = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  status: InquiryDraftStatus;
+  toAddress: string;
+  fromAddress: string;
+  replyToAddress: string;
+  subject: string;
+  textBody: string;
+  inReplyToHash: string | null;
+  referencesHash: string | null;
+};
+
+export type InquiryDraftStatusUpdateInput = {
+  id: string;
+  status: InquiryDraftStatus;
+  operator: string;
+  at: string;
+  providerMessageIdHash?: string | null;
+  lastErrorCode?: string | null;
+};
+
+export type InquiryDraftContentUpdateInput = {
+  id: string;
+  subject: string;
+  textBody: string;
+  updatedAt: string;
+};
+
 type InquiryDatabase = Pick<D1Database, "prepare">;
 
 export async function upsertInquiryThread(
@@ -174,3 +225,165 @@ export async function recordInquiryEvent(
     )
     .run();
 }
+
+export async function recordInquiryDraft(
+  database: InquiryDatabase,
+  input: InquiryDraftInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        INSERT INTO inquiry_drafts (
+          id,
+          thread_id,
+          message_id,
+          status,
+          to_address,
+          to_address_hash,
+          from_address,
+          reply_to_address,
+          subject,
+          text_body,
+          in_reply_to_hash,
+          references_hash,
+          created_by,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    )
+    .bind(
+      input.id,
+      input.threadId,
+      input.messageId,
+      input.status,
+      input.toAddress,
+      input.toAddressHash,
+      input.fromAddress,
+      input.replyToAddress,
+      input.subject,
+      input.textBody,
+      input.inReplyToHash,
+      input.referencesHash,
+      input.createdBy,
+      input.createdAt,
+      input.updatedAt,
+    )
+    .run();
+}
+
+export async function getInquiryDraft(
+  database: InquiryDatabase,
+  id: string,
+): Promise<InquiryDraftRecord | null> {
+  const row = await database
+    .prepare(
+      `
+        SELECT
+          id,
+          thread_id,
+          message_id,
+          status,
+          to_address,
+          from_address,
+          reply_to_address,
+          subject,
+          text_body,
+          in_reply_to_hash,
+          references_hash
+        FROM inquiry_drafts
+        WHERE id = ?
+      `,
+    )
+    .bind(id)
+    .first<InquiryDraftRow>();
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    messageId: row.message_id,
+    status: row.status,
+    toAddress: row.to_address,
+    fromAddress: row.from_address,
+    replyToAddress: row.reply_to_address,
+    subject: row.subject,
+    textBody: row.text_body,
+    inReplyToHash: row.in_reply_to_hash,
+    referencesHash: row.references_hash,
+  };
+}
+
+export async function updateInquiryDraftStatus(
+  database: InquiryDatabase,
+  input: InquiryDraftStatusUpdateInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        UPDATE inquiry_drafts SET
+          status = ?,
+          approved_by = CASE WHEN ? = 'approved' THEN ? ELSE approved_by END,
+          rejected_by = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_by END,
+          sent_by = CASE WHEN ? IN ('sent', 'send_failed') THEN ? ELSE sent_by END,
+          sent_at = CASE WHEN ? IN ('sent', 'send_failed') THEN ? ELSE sent_at END,
+          provider_message_id_hash = ?,
+          last_error_code = ?,
+          updated_at = ?
+        WHERE id = ?
+      `,
+    )
+    .bind(
+      input.status,
+      input.status,
+      input.operator,
+      input.status,
+      input.operator,
+      input.status,
+      input.operator,
+      input.status,
+      input.at,
+      input.providerMessageIdHash ?? null,
+      input.lastErrorCode ?? null,
+      input.at,
+      input.id,
+    )
+    .run();
+}
+
+export async function updateInquiryDraftContent(
+  database: InquiryDatabase,
+  input: InquiryDraftContentUpdateInput,
+): Promise<void> {
+  await database
+    .prepare(
+      `
+        UPDATE inquiry_drafts SET
+          subject = ?,
+          text_body = ?,
+          updated_at = ?
+        WHERE id = ?
+        AND status = 'draft'
+      `,
+    )
+    .bind(input.subject, input.textBody, input.updatedAt, input.id)
+    .run();
+}
+
+type InquiryDraftRow = {
+  id: string;
+  thread_id: string;
+  message_id: string | null;
+  status: InquiryDraftStatus;
+  to_address: string;
+  from_address: string;
+  reply_to_address: string;
+  subject: string;
+  text_body: string;
+  in_reply_to_hash: string | null;
+  references_hash: string | null;
+};

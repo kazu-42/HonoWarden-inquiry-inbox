@@ -25,6 +25,19 @@
       "bucket_name": "honowarden-inquiry-objects",
     },
   ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": [
+        "security@honowarden.com",
+        "support@honowarden.com",
+        "hello@honowarden.com",
+        "admin@honowarden.com",
+        "postmaster@honowarden.com",
+        "abuse@honowarden.com",
+      ],
+    },
+  ],
   "env": {
     "staging": {
       "name": "honowarden-inquiry-inbox-staging",
@@ -47,6 +60,19 @@
           "bucket_name": "honowarden-inquiry-staging-objects",
         },
       ],
+      "send_email": [
+        {
+          "name": "EMAIL",
+          "allowed_sender_addresses": [
+            "security@honowarden.com",
+            "support@honowarden.com",
+            "hello@honowarden.com",
+            "admin@honowarden.com",
+            "postmaster@honowarden.com",
+            "abuse@honowarden.com",
+          ],
+        },
+      ],
     },
     "production": {
       "name": "honowarden-inquiry-inbox",
@@ -67,6 +93,19 @@
         {
           "binding": "INQUIRY_OBJECTS",
           "bucket_name": "honowarden-inquiry-objects",
+        },
+      ],
+      "send_email": [
+        {
+          "name": "EMAIL",
+          "allowed_sender_addresses": [
+            "security@honowarden.com",
+            "support@honowarden.com",
+            "hello@honowarden.com",
+            "admin@honowarden.com",
+            "postmaster@honowarden.com",
+            "abuse@honowarden.com",
+          ],
         },
       ],
     },

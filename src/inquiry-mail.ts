@@ -224,8 +224,17 @@ async function recordInboundMetadata(input: {
   const messageIdHash = parsed.messageId
     ? await sha256Hex(parsed.messageId)
     : null;
-  const threadKey = await buildThreadKey(input.mailbox, sender, parsed);
-  const threadId = `thread_${await sha256Hex(`${input.mailbox}:${threadKey}`)}`;
+  const replyThreadId = resolveReplyThreadId(
+    normalizeEmailAddress(input.message.to),
+    input.mailbox,
+  );
+  const threadKey =
+    replyThreadId !== null
+      ? `reply:${replyThreadId}`
+      : await buildThreadKey(input.mailbox, sender, parsed);
+  const threadId =
+    replyThreadId ??
+    `thread_${await sha256Hex(`${input.mailbox}:${threadKey}`)}`;
   const inquiryMessageId = `message_${crypto.randomUUID()}`;
   const headerMetadataJson = await buildHeaderMetadataJson(
     input.message.headers,
@@ -369,6 +378,10 @@ export function resolveAllowedMailbox(
   if (!localPart || !domain || domain !== "honowarden.com") {
     return null;
   }
+  const mailbox = localPart.split("+", 1)[0];
+  if (!mailbox) {
+    return null;
+  }
 
   const allowed = new Set(
     (configuredMailboxes ?? defaultInquiryMailboxes.join(","))
@@ -377,7 +390,24 @@ export function resolveAllowedMailbox(
       .filter(Boolean),
   );
 
-  return allowed.has(localPart) ? localPart : null;
+  return allowed.has(mailbox) ? mailbox : null;
+}
+
+function resolveReplyThreadId(
+  recipient: string,
+  mailbox: string,
+): string | null {
+  const [localPart, domain] = recipient.split("@");
+  if (domain !== "honowarden.com" || !localPart) {
+    return null;
+  }
+
+  const [recipientMailbox, subaddress] = localPart.split("+", 2);
+  if (recipientMailbox !== mailbox || !subaddress) {
+    return null;
+  }
+
+  return /^thread_[a-zA-Z0-9_-]+$/.test(subaddress) ? subaddress : null;
 }
 
 function normalizeEmailAddress(value: string): string {

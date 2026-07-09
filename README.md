@@ -16,11 +16,14 @@ encrypted vault payloads.
 - Store metadata-only inbound records in D1 with retention deadlines.
 - Reject attachments until R2 retention and access rules are explicitly enabled.
 - Optionally forward accepted messages to a verified private destination.
+- Store human-reviewed outbound reply drafts and send only explicitly approved
+  drafts through the Cloudflare Email Service binding.
 - Never commit message bodies, attachment contents, private forwarding
   destinations, or mailbox contents to git.
 
-Outbound replies, AI triage, and Linear issue creation are separate follow-up
-phases.
+AI triage, autonomous sending, and Linear issue creation are separate follow-up
+phases. Live outbound sends require a separate operator approval and evidence
+record.
 
 ## References
 

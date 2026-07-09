@@ -1,11 +1,17 @@
 import type { InquiryBindings } from "./bindings";
 import { handleInquiryEmail } from "./inquiry-mail";
 import type { InquiryEmailMessage } from "./inquiry-mail";
+import { handleInquiryHttpRequest } from "./outbound-replies";
 
 const serviceName = "honowarden-inquiry-inbox";
 
 export default {
-  fetch(_request: Request, env: InquiryBindings): Response {
+  async fetch(request: Request, env: InquiryBindings): Promise<Response> {
+    const apiResponse = await handleInquiryHttpRequest(request, env);
+    if (apiResponse) {
+      return apiResponse;
+    }
+
     return Response.json({
       service: serviceName,
       status: "ok",

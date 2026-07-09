@@ -102,6 +102,33 @@ describe("inquiry email handler", () => {
     );
   });
 
+  it("routes plus-addressed replies back to the existing thread id", async () => {
+    const database = new RecordingD1Database();
+    const message = new FakeEmailMessage(
+      "reporter@example.test",
+      "support+thread_existing@honowarden.com",
+      textEmail({ to: "support+thread_existing@honowarden.com" }),
+    );
+
+    const result = await handleInquiryEmail(
+      message,
+      {
+        INQUIRY_DB: database as unknown as D1Database,
+      },
+      new Date("2026-07-09T00:00:00.000Z"),
+    );
+
+    expect(result).toMatchObject({
+      status: "stored_metadata",
+      mailbox: "support",
+      threadId: "thread_existing",
+    });
+    expect(database.boundValues).toContain("reply:thread_existing");
+    expect(database.boundValues).toContain(
+      "support+thread_existing@honowarden.com",
+    );
+  });
+
   it("rejects recipients outside the configured honowarden.com mailboxes", async () => {
     const database = new RecordingD1Database();
     const message = new FakeEmailMessage(
@@ -182,6 +209,12 @@ describe("resolveAllowedMailbox", () => {
     expect(resolveAllowedMailbox("security@honowarden.com", undefined)).toBe(
       "security",
     );
+    expect(
+      resolveAllowedMailbox(
+        "support+thread_existing@honowarden.com",
+        undefined,
+      ),
+    ).toBe("support");
     expect(resolveAllowedMailbox("security@example.com", undefined)).toBeNull();
     expect(resolveAllowedMailbox("sales@honowarden.com", undefined)).toBeNull();
   });

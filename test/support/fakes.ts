@@ -12,9 +12,12 @@ export class RecordingD1Database {
   readonly queries: string[] = [];
   readonly boundValues: unknown[] = [];
 
+  constructor(private readonly firstResult: unknown | null = null) {}
+
   prepare(query: string): D1PreparedStatement {
     this.queries.push(query);
     const recordedBoundValues = this.boundValues;
+    const firstResult = this.firstResult;
 
     const statement = {
       bind(...boundValues: unknown[]) {
@@ -36,7 +39,7 @@ export class RecordingD1Database {
         };
       },
       async first<T = unknown>(): Promise<T | null> {
-        return null;
+        return firstResult as T | null;
       },
       async raw<T = unknown[]>(): Promise<T[]> {
         return [] as T[];
