@@ -16,6 +16,9 @@
     "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
     "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+    "HONOWARDEN_LINEAR_TEAM_ID": "6d2d2f00-2bf6-4dde-bfee-5414946b06ee",
+    "HONOWARDEN_LINEAR_PROJECT_ID": "41dba3c0-4f46-4b95-b65b-abf31be14e3c",
+    "HONOWARDEN_LINEAR_DEFAULT_LABEL_IDS": "91da6ffb-518c-44b0-a08c-38245edb3cba,0738f083-7b54-44ac-a8ea-9e86c32b028f,76de311e-a2f3-4de4-b8f5-d3a139063370",
   },
   "ai": {
     "binding": "AI",
@@ -66,6 +69,9 @@
         "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
         "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+        "HONOWARDEN_LINEAR_TEAM_ID": "6d2d2f00-2bf6-4dde-bfee-5414946b06ee",
+        "HONOWARDEN_LINEAR_PROJECT_ID": "41dba3c0-4f46-4b95-b65b-abf31be14e3c",
+        "HONOWARDEN_LINEAR_DEFAULT_LABEL_IDS": "91da6ffb-518c-44b0-a08c-38245edb3cba,0738f083-7b54-44ac-a8ea-9e86c32b028f,76de311e-a2f3-4de4-b8f5-d3a139063370",
       },
       "ai": {
         "binding": "AI",
@@ -116,6 +122,9 @@
         "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
         "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+        "HONOWARDEN_LINEAR_TEAM_ID": "6d2d2f00-2bf6-4dde-bfee-5414946b06ee",
+        "HONOWARDEN_LINEAR_PROJECT_ID": "41dba3c0-4f46-4b95-b65b-abf31be14e3c",
+        "HONOWARDEN_LINEAR_DEFAULT_LABEL_IDS": "91da6ffb-518c-44b0-a08c-38245edb3cba,0738f083-7b54-44ac-a8ea-9e86c32b028f,76de311e-a2f3-4de4-b8f5-d3a139063370",
       },
       "ai": {
         "binding": "AI",
