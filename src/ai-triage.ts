@@ -257,6 +257,12 @@ async function generateTriageResult(
 
   const parsed = parseWorkersAiOutput(output);
   if (!parsed) {
+    console.error(
+      JSON.stringify({
+        event: "inquiry.ai_response_invalid",
+        ...summarizeWorkersAiOutput(output),
+      }),
+    );
     return { ok: false, error: "ai_provider_invalid_response", status: 502 };
   }
 
@@ -315,6 +321,21 @@ function parseWorkersAiOutput(value: unknown): WorkersAiTriageOutput | null {
   } catch {
     return null;
   }
+}
+
+function summarizeWorkersAiOutput(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) {
+    return { outputType: typeof value };
+  }
+
+  const response = value.response;
+  return {
+    outputType: "object",
+    outputKeys: Object.keys(value).sort(),
+    responseType: Array.isArray(response) ? "array" : typeof response,
+    responseKeys: isRecord(response) ? Object.keys(response).sort() : undefined,
+    responseLength: typeof response === "string" ? response.length : undefined,
+  };
 }
 
 function classificationResult(

@@ -1,7 +1,7 @@
 # HON-75 Cloudflare Access Authentication Evidence
 
-Status: implementation and Access applications complete; custom-domain live
-readback pending.
+Status: implementation, Access applications, deployment, and live readback
+complete.
 
 Updated: 2026-07-11.
 
@@ -52,13 +52,23 @@ Unit and route coverage includes:
 - unknown environment fail-closed behavior;
 - existing development-only API behavior.
 
-## Pending Live Work
+## Live Deployment Evidence
 
-- Configure protected custom domains for the two Workers.
-- Deploy and prove workers.dev and preview URLs are disabled.
-- Record unauthorized and authorized synthetic HTTP readbacks without JWT or
-  operator-email values.
-- Re-run Email Routing smoke to prove the email handler is unaffected.
+- Custom domains are active at `inbox-staging.honowarden.com` and
+  `inbox.honowarden.com`; `workers_dev` and preview URLs remain disabled.
+- Staging Worker version: `2f6b920a-a80a-4524-89ee-043b6dafe4c2`.
+- Production Worker version: `b0f626ad-701d-4981-9627-4d2a4ef496c0`.
+- Both domains return 302 to Cloudflare Access without credentials.
+- The exact configured service identity returns 200 from `/health` and reaches
+  protected API validation (`400 invalid_thread_id`) on both domains.
+- The one-time service-token material is stored outside the repository with
+  mode 0600. Only its fixed, verified client identity is accepted by the
+  Worker; raw token values are not recorded here.
+
+The account's existing Email Routing rule still targets the original
+`honowarden` Worker, not this dedicated inbox Worker. HTTP hardening therefore
+did not alter inbound delivery. Moving the route is tracked separately and must
+include an end-to-end mail smoke before the old path is retired.
 
 ## Access Application Checkpoint
 
