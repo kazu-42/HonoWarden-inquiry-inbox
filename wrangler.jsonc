@@ -36,6 +36,7 @@
   "send_email": [
     {
       "name": "EMAIL",
+      "allowed_destination_addresses": ["inquiry-smoke@honowarden.com"],
       "allowed_sender_addresses": [
         "security@honowarden.com",
         "support@honowarden.com",
@@ -85,6 +86,7 @@
       "send_email": [
         {
           "name": "EMAIL",
+          "allowed_destination_addresses": ["inquiry-smoke@honowarden.com"],
           "allowed_sender_addresses": [
             "security@honowarden.com",
             "support@honowarden.com",
@@ -134,6 +136,7 @@
       "send_email": [
         {
           "name": "EMAIL",
+          "allowed_destination_addresses": ["inquiry-smoke@honowarden.com"],
           "allowed_sender_addresses": [
             "security@honowarden.com",
             "support@honowarden.com",
