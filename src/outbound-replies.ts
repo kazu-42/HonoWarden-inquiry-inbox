@@ -319,13 +319,20 @@ async function sendDraft(
         "X-HonoWarden-Inquiry-Draft": draft.id,
       },
     });
-  } catch {
+  } catch (error) {
+    const providerErrorCode = resolveEmailSendErrorCode(error);
+    console.error(
+      JSON.stringify({
+        event: "inquiry.email_send_failed",
+        providerErrorCode,
+      }),
+    );
     await updateInquiryDraftStatus(env.INQUIRY_DB, {
       id: draft.id,
       status: "send_failed",
       operator,
       at: sentAt,
-      lastErrorCode: "email_send_failed",
+      lastErrorCode: providerErrorCode,
     });
     await recordInquiryEvent(env.INQUIRY_DB, {
       id: crypto.randomUUID(),
@@ -335,7 +342,7 @@ async function sendDraft(
       status: "send_failed",
       metadataJson: JSON.stringify({
         draftId: draft.id,
-        errorCode: "email_send_failed",
+        errorCode: providerErrorCode,
       }),
       occurredAt: sentAt,
     });
@@ -368,6 +375,16 @@ async function sendDraft(
       status: "sent",
     },
   });
+}
+
+function resolveEmailSendErrorCode(error: unknown): string {
+  if (!isRecord(error) || typeof error.code !== "string") {
+    return "email_send_failed";
+  }
+
+  return /^E_[A-Z0-9_]{1,64}$/.test(error.code)
+    ? error.code
+    : "email_send_failed";
 }
 
 function resolveOperatorIdentity(request: Request): string | null {
