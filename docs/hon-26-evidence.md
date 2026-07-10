@@ -1,6 +1,6 @@
 # HON-26 AI Triage And Draft Evidence
 
-Status: Workers AI adapter implemented locally; live invocation not performed.
+Status: Workers AI adapter deployed and verified with a synthetic staging run.
 
 Updated: 2026-07-11.
 
@@ -49,14 +49,21 @@ alias migration, and production triage smoke remain out of scope.
 
 Local checks:
 
-- `pnpm exec vitest run test/ai-triage.test.ts`: passed, 7 tests.
-- `pnpm check`: passed.
+- `pnpm exec vitest run test/ai-triage.test.ts`: passed, 8 tests.
+- `pnpm format`, `pnpm check`, `pnpm lint`, and `pnpm test`: passed, 54
+  tests total.
+- Staging migrations `0002` through `0004` applied successfully.
+- Staging Worker version `408294f0-7feb-410b-a5d6-647a9a9bb37a` returned 201
+  for a synthetic Access-authenticated triage request.
+- Live output used model `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, classified
+  the request as `support_request`, required human approval, and created one
+  draft and one AI run without recording raw private input in this evidence.
+- An earlier live attempt returned `ai_provider_invalid_response`; D1 readback
+  confirmed zero runs and drafts from that attempt. This proves provider/schema
+  failures remain fail-loud and do not partially persist workflow state.
 
-## Pending Live Work
+## Remaining Work
 
-- Apply `migrations/0003_ai_triage.sql` to staging and production D1.
-- Run a staging-only triage smoke with synthetic content before processing real
-  inbound reports.
-- Record Workers AI model id, invocation outcome, D1 run/draft rows, and audit
-  event readback without copying prompt bodies, private addresses, or drafts.
+- Apply migrations `0002` through `0004` to production D1 after the staging
+  checkpoint.
 - Keep all external writes approval-gated.
