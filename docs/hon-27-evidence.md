@@ -1,8 +1,8 @@
 # HON-27 Linear Issue Workflow Evidence
 
-Status: implemented locally; live Linear issue creation not performed.
+Status: deployed and verified with duplicate-safe synthetic issue creation.
 
-Generated: 2026-07-09.
+Updated: 2026-07-11.
 
 ## Scope
 
@@ -56,7 +56,8 @@ responses.
 Local checks:
 
 - `pnpm exec vitest run test/linear-issues.test.ts test/migrations.test.ts`:
-  passed, 2 files / 12 tests.
+  passed.
+- Full repository gate: format, typecheck, lint, and 56 tests passed.
 
 Required PR checks:
 
@@ -66,13 +67,24 @@ Required PR checks:
 - `pnpm format`
 - `git diff --check`
 
-## Pending Live Work
+## Live Evidence
 
-- Apply `migrations/0004_linear_links.sql` to staging and production D1.
-- Set `LINEAR_API_KEY` as a Worker secret and configure the target team id only
-  after a live write window is approved.
-- Run a staging-only Linear create smoke with synthetic/redacted content.
-- Record Linear issue id/URL, D1 link readback, and event readback without
-  message bodies or private sender data.
-- Keep AI-triggered Linear writes disabled until an explicit automation policy
-  is approved.
+- Migration `0004_linear_links.sql` is applied in staging and production.
+- `LINEAR_API_KEY` is installed as a Worker secret in both environments; only
+  the secret name was read back.
+- PR #13 configured the HonoWarden team, `Website and Domain` project, and the
+  existing website, operations, and feature labels.
+- Staging Worker `f7faacec-58c1-48c5-abce-6a39a1c0f8d4` created synthetic
+  issue `HON-77` after an Access-authenticated request with
+  `confirmCreate: true`.
+- Repeating the same thread request returned `HON-77` with `duplicate: true`;
+  no second Linear issue was created.
+- D1 readback recorded one created link, one `linear_issue_create` event, and
+  one `linear_duplicate` event. The redacted summary, secret, private address,
+  and raw message body were not copied into this evidence.
+- Synthetic issue `HON-77` was moved to Canceled after verification.
+- Production Worker `83bd1177-2c22-43cc-8a68-107677b0eef8` has the same
+  target configuration. No production Linear issue was created.
+
+AI-triggered Linear writes remain disabled. External creation still requires
+an explicit authenticated request with `confirmCreate: true`.
