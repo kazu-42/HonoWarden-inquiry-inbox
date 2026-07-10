@@ -155,6 +155,56 @@ describe("AI inquiry triage", () => {
     expect(boundValues).not.toContain("secret-token-123");
   });
 
+  it("accepts the object response returned by Workers AI JSON mode", async () => {
+    const database = new RecordingD1Database();
+    const ai = {
+      async run() {
+        return {
+          response: {
+            classification: "support_request",
+            confidence: 0.87,
+            draftText: "Thanks. A maintainer will review your login issue.",
+          },
+        };
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request("https://inbox.example.test/api/triage-runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Cf-Access-Authenticated-User-Email": "operator@example.test",
+        },
+        body: JSON.stringify({
+          threadId: "thread_workers_ai_json_mode",
+          mailbox: "support",
+          from: "support@honowarden.com",
+          subject: "Login help",
+          text: "Login is failing.",
+        }),
+      }),
+      {
+        AI: ai as unknown as Ai,
+        INQUIRY_DB: database as unknown as D1Database,
+        HONOWARDEN_INQUIRY_AI_PROVIDER: "workers-ai",
+      } as InquiryBindings,
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      triage: {
+        classification: "support_request",
+        confidence: 0.87,
+        modelId: "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      },
+      draft: { status: "draft" },
+    });
+    expect(database.boundValues).toContain(
+      "Thanks. A maintainer will review your login issue.",
+    );
+  });
+
   it("fails loudly without persistence when Workers AI returns an invalid result", async () => {
     const database = new RecordingD1Database();
     const ai = {
