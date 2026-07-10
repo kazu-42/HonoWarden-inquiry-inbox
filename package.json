@@ -22,6 +22,7 @@
     "typegen": "wrangler types"
   },
   "dependencies": {
+    "jose": "^6.2.3",
     "postal-mime": "^2.6.3"
   },
   "devDependencies": {

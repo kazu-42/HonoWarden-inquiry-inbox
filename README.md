@@ -7,6 +7,11 @@ It has its own D1 database, R2 bucket, Email Routing handler, and operational
 secrets so inbound contact mail cannot access vault users, token secrets, or
 encrypted vault payloads.
 
+All deployed HTTP API routes require a cryptographically verified Cloudflare
+Access application JWT. The Worker never trusts the forwarded identity header
+by itself. `workers.dev` and preview URLs remain disabled; Email Routing invokes
+the separate `email()` handler without crossing the HTTP Access boundary.
+
 ## Scope
 
 - Receive selected `honowarden.com` inquiry addresses through Cloudflare Email

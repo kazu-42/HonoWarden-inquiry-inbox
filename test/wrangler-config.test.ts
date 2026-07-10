@@ -16,4 +16,9 @@ describe("Wrangler AI configuration", () => {
       ),
     ).toHaveLength(3);
   });
+
+  it("keeps workers.dev and preview URLs disabled in every environment", () => {
+    expect(wranglerConfig.match(/"workers_dev": false/g)).toHaveLength(3);
+    expect(wranglerConfig.match(/"preview_urls": false/g)).toHaveLength(3);
+  });
 });
