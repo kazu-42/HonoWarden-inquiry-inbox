@@ -1,4 +1,9 @@
 import { createAiTriageRun, pendingTriageRecipient } from "./ai-triage";
+import {
+  authenticateInquiryAccess,
+  verifiedOperatorHeader,
+  withVerifiedOperator,
+} from "./access-auth";
 import type { InquiryBindings } from "./bindings";
 import { createLinearIssueWorkflow } from "./linear-issues";
 import {
@@ -17,6 +22,14 @@ export async function handleInquiryHttpRequest(
   now = new Date(),
 ): Promise<Response | null> {
   const url = new URL(request.url);
+
+  if (url.pathname.startsWith("/api/")) {
+    const auth = await authenticateInquiryAccess(request, env);
+    if (!auth.ok) {
+      return jsonResponse({ error: auth.error }, auth.status);
+    }
+    request = withVerifiedOperator(request, auth.operator);
+  }
 
   if (url.pathname === "/api/drafts" && request.method === "POST") {
     return createDraft(request, env, now);
@@ -358,9 +371,7 @@ async function sendDraft(
 }
 
 function resolveOperatorIdentity(request: Request): string | null {
-  const identity =
-    request.headers.get("Cf-Access-Authenticated-User-Email") ??
-    request.headers.get("X-HonoWarden-Operator");
+  const identity = request.headers.get(verifiedOperatorHeader);
 
   if (!identity) {
     return null;

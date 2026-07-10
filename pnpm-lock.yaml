@@ -7,6 +7,9 @@ settings:
 importers:
   .:
     dependencies:
+      jose:
+        specifier: ^6.2.3
+        version: 6.2.3
       postal-mime:
         specifier: ^2.6.3
         version: 2.7.5
@@ -1422,6 +1425,12 @@ packages:
         integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==,
       }
 
+  jose@6.2.3:
+    resolution:
+      {
+        integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==,
+      }
+
   json-buffer@3.0.1:
     resolution:
       {
@@ -2759,6 +2768,8 @@ snapshots:
       is-extglob: 2.1.1
 
   isexe@2.0.0: {}
+
+  jose@6.2.3: {}
 
   json-buffer@3.0.1: {}
 

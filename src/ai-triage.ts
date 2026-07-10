@@ -1,4 +1,5 @@
 import type { InquiryBindings } from "./bindings";
+import { verifiedOperatorHeader } from "./access-auth";
 import {
   recordInquiryAiRun,
   recordInquiryDraft,
@@ -482,9 +483,7 @@ function validateTriageInput(
 }
 
 function resolveOperatorIdentity(request: Request): string | null {
-  const identity =
-    request.headers.get("Cf-Access-Authenticated-User-Email") ??
-    request.headers.get("X-HonoWarden-Operator");
+  const identity = request.headers.get(verifiedOperatorHeader);
 
   if (!identity) {
     return null;

@@ -5,6 +5,34 @@ import type { InquiryBindings } from "../src/bindings";
 import { RecordingD1Database } from "./support/fakes";
 
 describe("human-approved inquiry replies", () => {
+  it("does not trust a forwarded identity header in production", async () => {
+    const database = new RecordingD1Database();
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts",
+        {
+          threadId: "thread_1",
+          to: "reporter@example.test",
+          from: "support@honowarden.com",
+          subject: "Re: Support",
+          text: "safe reply body",
+        },
+        { "Cf-Access-Authenticated-User-Email": "spoofed@example.test" },
+      ),
+      {
+        HONOWARDEN_INQUIRY_ENV: "production",
+        INQUIRY_DB: database as unknown as D1Database,
+      } as InquiryBindings,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "access_not_configured",
+    });
+    expect(database.queries).toEqual([]);
+  });
+
   it("requires an Access identity before draft mutation", async () => {
     const database = new RecordingD1Database();
 
