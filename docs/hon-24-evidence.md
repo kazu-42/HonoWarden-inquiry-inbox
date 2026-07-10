@@ -1,6 +1,6 @@
 # HON-24 Inquiry Mailbox Storage Evidence
 
-Status: implemented with hidden live-route smoke pending.
+Status: dedicated hidden route active; external SMTP live smoke pending.
 
 Generated: 2026-07-09.
 
@@ -42,8 +42,8 @@ Email Routing:
 
 - Existing public routes for `security`, `support`, `hello`, `admin`,
   `postmaster`, and `abuse` remain forwarding-only.
-- Hidden smoke route `inquiry-smoke@honowarden.com` points to the production
-  Worker action.
+- Hidden smoke route `inquiry-smoke@honowarden.com` points to the dedicated
+  production `honowarden-inquiry-inbox` Worker action.
 
 Secrets:
 
@@ -98,3 +98,14 @@ Expected result:
 
 After that readback passes, public aliases can be migrated from forwarding-only
 routes to Worker routes in a separate, reversible operation.
+
+The hidden rule was switched from the original `honowarden` Worker to the
+dedicated Worker on 2026-07-11. The six public forwarding rules and disabled
+catch-all were unchanged. Rollback is a PUT of the same rule ID with Worker
+`honowarden`.
+
+An attempted synthetic send through the dedicated Worker's Email Service
+binding failed with `E_RECIPIENT_NOT_ALLOWED`: Cloudflare requires outbound
+recipients to be verified destinations, and a routing alias is not one. No
+inbound D1 row was claimed from that attempt. The final live smoke therefore
+still requires an external SMTP sender.
