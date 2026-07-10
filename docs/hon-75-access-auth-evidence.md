@@ -1,6 +1,6 @@
 # HON-75 Cloudflare Access Authentication Evidence
 
-Status: implementation complete; live Access application and custom-domain
+Status: implementation and Access applications complete; custom-domain live
 readback pending.
 
 Updated: 2026-07-11.
@@ -49,10 +49,21 @@ Unit and route coverage includes:
 
 ## Pending Live Work
 
-- Create staging and production Access applications and allow policies.
 - Configure protected custom domains for the two Workers.
-- Store team-domain and audience values as Worker secrets.
 - Deploy and prove workers.dev and preview URLs are disabled.
 - Record unauthorized and authorized synthetic HTTP readbacks without JWT or
   operator-email values.
 - Re-run Email Routing smoke to prove the email handler is unaffected.
+
+## Access Application Checkpoint
+
+Created 2026-07-11:
+
+| Environment | Domain                         | Application ID                         | Audience tag   | Policy decision |
+| ----------- | ------------------------------ | -------------------------------------- | -------------- | --------------- |
+| staging     | `inbox-staging.honowarden.com` | `9df03706-5efc-4b89-a0db-b5c976a11788` | `7a909d0eb478` | allow           |
+| production  | `inbox.honowarden.com`         | `0f2d93e6-7ab3-4eef-847a-d1cc4eb0db08` | `6499d1acd654` | allow           |
+
+Each application has one exact-operator-email allow policy. The email value is
+not recorded here. Team-domain and audience values are stored as Worker secrets
+for both environments; secret-list readback records names only.

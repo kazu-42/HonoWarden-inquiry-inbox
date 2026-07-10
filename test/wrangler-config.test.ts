@@ -21,4 +21,12 @@ describe("Wrangler AI configuration", () => {
     expect(wranglerConfig.match(/"workers_dev": false/g)).toHaveLength(3);
     expect(wranglerConfig.match(/"preview_urls": false/g)).toHaveLength(3);
   });
+
+  it("declares separate staging and production Access-protected domains", () => {
+    expect(wranglerConfig).toContain(
+      '"pattern": "inbox-staging.honowarden.com"',
+    );
+    expect(wranglerConfig).toContain('"pattern": "inbox.honowarden.com"');
+    expect(wranglerConfig.match(/"custom_domain": true/g)).toHaveLength(2);
+  });
 });
