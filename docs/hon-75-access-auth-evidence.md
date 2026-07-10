@@ -17,6 +17,11 @@ JWKS and requires:
 - a non-expired token;
 - a valid email claim for the operator identity.
 
+Access service-token JWTs use `common_name` instead of `email`. The Worker
+accepts that path only when the verified claim exactly matches
+`HONOWARDEN_ACCESS_SERVICE_CLIENT_ID`, then records the fixed identity
+`service:inquiry-automation` rather than the raw client id.
+
 The forwarded email header and the internal verified-operator header are removed
 from the incoming request. Endpoint handlers receive only the operator identity
 derived from the verified JWT. Missing Access configuration fails with 503;
