@@ -361,7 +361,10 @@ describe("human-approved inquiry replies", () => {
         INQUIRY_DB: database as unknown as D1Database,
         EMAIL: {
           async send(): Promise<unknown> {
-            throw new Error("provider leaked reporter@example.test");
+            throw Object.assign(
+              new Error("provider leaked reporter@example.test"),
+              { code: "E_SENDER_DOMAIN_NOT_AVAILABLE" },
+            );
           },
         } as InquiryBindings["EMAIL"],
       } as InquiryBindings,
@@ -373,7 +376,10 @@ describe("human-approved inquiry replies", () => {
     expect(JSON.stringify(payload)).not.toContain("approved reply body");
     expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
     expect(database.boundValues).toContain("send_failed");
-    expect(database.boundValues).toContain("email_send_failed");
+    expect(database.boundValues).toContain("E_SENDER_DOMAIN_NOT_AVAILABLE");
+    expect(database.boundValues.join("\n")).not.toContain(
+      "provider leaked reporter@example.test",
+    );
   });
 });
 
