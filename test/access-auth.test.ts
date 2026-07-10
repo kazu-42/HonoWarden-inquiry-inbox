@@ -59,6 +59,56 @@ describe("Cloudflare Access authentication", () => {
     });
   });
 
+  it("accepts only the configured Access service token identity", async () => {
+    const serviceClientId = "service-client-id.access";
+    const token = await accessToken({
+      commonName: serviceClientId,
+      email: null,
+    });
+    const request = new Request("https://inbox.example.test/api/drafts", {
+      headers: { "Cf-Access-Jwt-Assertion": token },
+    });
+
+    const result = await authenticateInquiryAccess(
+      request,
+      {
+        ...productionBindings(),
+        HONOWARDEN_ACCESS_SERVICE_CLIENT_ID: serviceClientId,
+      },
+      localJwks,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      operator: "service:inquiry-automation",
+    });
+  });
+
+  it("rejects a valid service JWT for an unexpected client id", async () => {
+    const token = await accessToken({
+      commonName: "other-service.access",
+      email: null,
+    });
+    const request = new Request("https://inbox.example.test/api/drafts", {
+      headers: { "Cf-Access-Jwt-Assertion": token },
+    });
+
+    const result = await authenticateInquiryAccess(
+      request,
+      {
+        ...productionBindings(),
+        HONOWARDEN_ACCESS_SERVICE_CLIENT_ID: "expected-service.access",
+      },
+      localJwks,
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: "access_token_invalid",
+      status: 401,
+    });
+  });
+
   it("rejects missing JWTs in staging and production", async () => {
     const request = new Request("https://inbox.example.test/api/drafts", {
       headers: {
@@ -191,11 +241,18 @@ function productionBindings(): InquiryBindings {
 
 async function accessToken(options?: {
   audience?: string;
+  commonName?: string;
+  email?: string | null;
   expiresAt?: number;
   signingKey?: CryptoKey;
 }): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({ email: "verified@example.test" })
+  return new SignJWT({
+    ...(options?.email === null
+      ? {}
+      : { email: options?.email ?? "verified@example.test" }),
+    ...(options?.commonName ? { common_name: options.commonName } : {}),
+  })
     .setProtectedHeader({ alg: "RS256", kid: "primary" })
     .setIssuer(issuer)
     .setAudience(options?.audience ?? audience)

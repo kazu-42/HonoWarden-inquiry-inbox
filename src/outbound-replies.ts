@@ -378,7 +378,9 @@ function resolveOperatorIdentity(request: Request): string | null {
   }
 
   const normalized = identity.trim().toLowerCase();
-  return normalized.includes("@") ? normalized : null;
+  return normalized.includes("@") || normalized === "service:inquiry-automation"
+    ? normalized
+    : null;
 }
 
 async function readJsonObject(

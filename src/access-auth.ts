@@ -55,11 +55,19 @@ export async function authenticateInquiryAccess(
       },
     );
     const operator = normalizeEmail(payload.email);
-    if (!operator) {
-      return { ok: false, error: "access_token_invalid", status: 401 };
+    if (operator) {
+      return { ok: true, operator };
     }
 
-    return { ok: true, operator };
+    const serviceClientId = requiredString(
+      env.HONOWARDEN_ACCESS_SERVICE_CLIENT_ID,
+    );
+    const serviceCommonName = requiredString(payload.common_name);
+    if (serviceClientId && serviceCommonName === serviceClientId) {
+      return { ok: true, operator: "service:inquiry-automation" };
+    }
+
+    return { ok: false, error: "access_token_invalid", status: 401 };
   } catch {
     return { ok: false, error: "access_token_invalid", status: 401 };
   }
