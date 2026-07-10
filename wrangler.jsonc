@@ -12,6 +12,11 @@
     "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
     "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
     "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
+    "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+  },
+  "ai": {
+    "binding": "AI",
   },
   "d1_databases": [
     {
@@ -48,6 +53,11 @@
         "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
         "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
         "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
+        "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+      },
+      "ai": {
+        "binding": "AI",
       },
       "d1_databases": [
         {
@@ -84,6 +94,11 @@
         "HONOWARDEN_INQUIRY_RETENTION_DAYS": "365",
         "HONOWARDEN_INQUIRY_MAX_BYTES": "262144",
         "HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD": "0.75",
+        "HONOWARDEN_INQUIRY_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "HONOWARDEN_INQUIRY_AI_PROVIDER": "workers-ai",
+      },
+      "ai": {
+        "binding": "AI",
       },
       "d1_databases": [
         {
