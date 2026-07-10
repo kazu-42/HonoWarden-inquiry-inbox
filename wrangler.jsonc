@@ -51,6 +51,12 @@
       "name": "honowarden-inquiry-inbox-staging",
       "workers_dev": false,
       "preview_urls": false,
+      "routes": [
+        {
+          "pattern": "inbox-staging.honowarden.com",
+          "custom_domain": true,
+        },
+      ],
       "vars": {
         "HONOWARDEN_INQUIRY_ENV": "staging",
         "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
@@ -94,6 +100,12 @@
       "name": "honowarden-inquiry-inbox",
       "workers_dev": false,
       "preview_urls": false,
+      "routes": [
+        {
+          "pattern": "inbox.honowarden.com",
+          "custom_domain": true,
+        },
+      ],
       "vars": {
         "HONOWARDEN_INQUIRY_ENV": "production",
         "HONOWARDEN_INQUIRY_MAILBOXES": "security,support,hello,admin,postmaster,abuse,inquiry-smoke",
