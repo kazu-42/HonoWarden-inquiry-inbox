@@ -12,6 +12,10 @@ const linearMigration = readFileSync(
   "migrations/0004_linear_links.sql",
   "utf8",
 );
+const idempotencyMigration = readFileSync(
+  "migrations/0005_inbound_idempotency.sql",
+  "utf8",
+);
 
 describe("inquiry mailbox migration", () => {
   it("creates metadata, message, and event tables", () => {
@@ -91,5 +95,14 @@ describe("inquiry mailbox migration", () => {
     expect(linearMigration).not.toContain("api_key");
     expect(linearMigration).not.toContain("token");
     expect(linearMigration).not.toContain("raw_body");
+  });
+
+  it("deduplicates inbound Message-ID hashes per mailbox", () => {
+    expect(idempotencyMigration).toContain(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_inquiry_messages_mailbox_message_id_hash",
+    );
+    expect(idempotencyMigration).toContain("mailbox, message_id_hash");
+    expect(idempotencyMigration).toContain("message_id_hash IS NOT NULL");
+    expect(idempotencyMigration).not.toContain("message_id TEXT");
   });
 });

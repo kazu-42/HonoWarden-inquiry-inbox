@@ -102,6 +102,50 @@ describe("inquiry email handler", () => {
     );
   });
 
+  it("does not persist or forward a duplicate mailbox Message-ID", async () => {
+    const database = new RecordingD1Database({
+      id: "message_existing",
+      thread_id: "thread_existing",
+    });
+    const message = new FakeEmailMessage(
+      "reporter@example.test",
+      "support@honowarden.com",
+      textEmail({
+        to: "support@honowarden.com",
+        messageId: "<duplicate@example.test>",
+      }),
+    );
+
+    const result = await handleInquiryEmail(
+      message,
+      {
+        INQUIRY_DB: database as unknown as D1Database,
+        HONOWARDEN_SUPPORT_FORWARD_TO: "support-operator@example.test",
+      },
+      new Date("2026-07-09T00:00:00.000Z"),
+    );
+
+    expect(result).toEqual({
+      status: "duplicate",
+      mailbox: "support",
+      messageId: "message_existing",
+      threadId: "thread_existing",
+    });
+    expect(message.forwardedTo).toBeNull();
+    expect(database.queries.join("\n")).toContain(
+      "WHERE mailbox = ? AND message_id_hash = ?",
+    );
+    expect(database.queries.join("\n")).not.toContain(
+      "INSERT INTO inquiry_threads",
+    );
+    expect(database.queries.join("\n")).not.toContain(
+      "INSERT INTO inquiry_messages",
+    );
+    expect(database.queries.join("\n")).not.toContain(
+      "INSERT INTO inquiry_events",
+    );
+  });
+
   it("routes plus-addressed replies back to the existing thread id", async () => {
     const database = new RecordingD1Database();
     const message = new FakeEmailMessage(

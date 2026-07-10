@@ -167,6 +167,31 @@ export type InquiryLinearLinkFailedUpdateInput = {
 
 type InquiryDatabase = Pick<D1Database, "prepare">;
 
+export type ExistingInquiryMessage = {
+  id: string;
+  threadId: string;
+};
+
+export async function findInquiryMessageByMessageIdHash(
+  database: InquiryDatabase,
+  mailbox: string,
+  messageIdHash: string,
+): Promise<ExistingInquiryMessage | null> {
+  const row = await database
+    .prepare(
+      `
+        SELECT id, thread_id
+        FROM inquiry_messages
+        WHERE mailbox = ? AND message_id_hash = ?
+        LIMIT 1
+      `,
+    )
+    .bind(mailbox, messageIdHash)
+    .first<{ id: string; thread_id: string }>();
+
+  return row ? { id: row.id, threadId: row.thread_id } : null;
+}
+
 export async function upsertInquiryThread(
   database: InquiryDatabase,
   input: InquiryThreadInput,

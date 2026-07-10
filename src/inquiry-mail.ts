@@ -3,6 +3,7 @@ import PostalMime from "postal-mime";
 import type { InquiryBindings } from "./bindings";
 import { defaultInquiryMailboxes } from "./bindings";
 import {
+  findInquiryMessageByMessageIdHash,
   recordInquiryEvent,
   recordInquiryMessage,
   upsertInquiryThread,
@@ -21,6 +22,7 @@ export type InquiryEmailResult = {
   status:
     | "stored_metadata"
     | "forwarded"
+    | "duplicate"
     | "rejected_recipient"
     | "rejected_attachments"
     | "rejected_size";
@@ -97,6 +99,25 @@ export async function handleInquiryEmail(
   }
 
   const parsed = await parseEmailMetadata(raw);
+  const messageIdHash = parsed.messageId
+    ? await sha256Hex(parsed.messageId)
+    : null;
+
+  if (messageIdHash) {
+    const existing = await findInquiryMessageByMessageIdHash(
+      env.INQUIRY_DB,
+      mailbox,
+      messageIdHash,
+    );
+    if (existing) {
+      return {
+        status: "duplicate",
+        mailbox,
+        messageId: existing.id,
+        threadId: existing.threadId,
+      };
+    }
+  }
 
   if (parsed.attachmentCount > 0) {
     message.setReject("attachments are not accepted by this inbox");
