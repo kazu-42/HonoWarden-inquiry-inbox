@@ -280,12 +280,19 @@ async function generateTriageResult(
 }
 
 function parseWorkersAiOutput(value: unknown): WorkersAiTriageOutput | null {
-  if (!isRecord(value) || typeof value.response !== "string") {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  let parsed: unknown = value.response;
+  if (typeof parsed !== "string" && !isRecord(parsed)) {
     return null;
   }
 
   try {
-    const parsed: unknown = JSON.parse(value.response);
+    if (typeof parsed === "string") {
+      parsed = JSON.parse(parsed);
+    }
     if (!isRecord(parsed)) {
       return null;
     }
