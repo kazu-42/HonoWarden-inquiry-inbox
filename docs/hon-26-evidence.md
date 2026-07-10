@@ -1,8 +1,8 @@
 # HON-26 AI Triage And Draft Evidence
 
-Status: implemented locally; live AI provider invocation not performed.
+Status: Workers AI adapter implemented locally; live invocation not performed.
 
-Generated: 2026-07-09.
+Updated: 2026-07-11.
 
 ## Scope
 
@@ -13,16 +13,21 @@ HonoWarden inquiry inbox:
   classification, confidence, recommended action, tool-call output, and audit
   metadata.
 - `/api/triage-runs` HTTP API gated by Cloudflare Access identity.
-- Redaction of email addresses and token-like values before classification or
-  draft generation.
-- Deterministic local policy adapter for security report, support request,
-  abuse/postmaster, general inquiry, and noise/spam classes.
+- Redaction of email addresses and token-like values in both subject and body
+  before provider invocation, classification, persistence, or draft generation.
+- Workers AI binding adapter with configurable model id, JSON Schema response
+  request, strict local response validation, and fail-loud provider errors.
+- Deterministic local safety policy for security reports remains authoritative
+  if a model suggests a weaker classification or action.
 - Draft suggestions are stored as human-reviewable `draft` rows only.
 - AI-generated drafts use a redacted pending recipient and cannot be sent until
   a human replaces the recipient, edits the body, and approves the draft.
 
-Autonomous sends, live AI model calls, Linear issue creation, public alias
-migration, and production triage smoke are intentionally out of scope.
+The deterministic `local-policy-v1` adapter remains available for local tests.
+Staging and production are configured for Workers AI using
+`@cf/meta/llama-3.3-70b-instruct-fp8-fast`; the model id is overridable without
+code changes. Autonomous sends, Linear issue creation from AI output, public
+alias migration, and production triage smoke remain out of scope.
 
 ## Safety Boundaries
 
@@ -35,22 +40,23 @@ migration, and production triage smoke are intentionally out of scope.
   recipient is still present.
 - Confidence thresholds are configurable through
   `HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD`.
+- `HONOWARDEN_INQUIRY_AI_PROVIDER=workers-ai` fails with an explicit 503 when
+  the AI binding is absent and with 502 before persistence when invocation or
+  response validation fails. There is no silent production fallback.
+- Model-generated draft text is redacted again before D1 persistence.
 
 ## Verification
 
 Local checks:
 
-- `pnpm exec vitest run test/ai-triage.test.ts test/migrations.test.ts`: passed, 2 files / 8 tests.
-- `pnpm test`: passed, 5 files / 26 tests.
+- `pnpm exec vitest run test/ai-triage.test.ts`: passed, 7 tests.
 - `pnpm check`: passed.
-- `pnpm lint`: passed.
-- `pnpm format`: passed.
 
 ## Pending Live Work
 
 - Apply `migrations/0003_ai_triage.sql` to staging and production D1.
-- Decide whether to replace `local-policy-v1` with Workers AI or another
-  provider after prompt, model, cost, and retention gates are approved.
 - Run a staging-only triage smoke with synthetic content before processing real
   inbound reports.
+- Record Workers AI model id, invocation outcome, D1 run/draft rows, and audit
+  event readback without copying prompt bodies, private addresses, or drafts.
 - Keep all external writes approval-gated.

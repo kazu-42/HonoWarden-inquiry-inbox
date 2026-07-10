@@ -18,17 +18,17 @@ encrypted vault payloads.
 - Optionally forward accepted messages to a verified private destination.
 - Store human-reviewed outbound reply drafts and send only explicitly approved
   drafts through the Cloudflare Email Service binding.
-- Run redaction-first inquiry triage and draft suggestion generation without
-  autonomous external writes.
+- Run redaction-first inquiry triage and draft suggestion generation through a
+  validated Workers AI adapter without autonomous external writes.
 - Require a human to replace AI placeholder recipients before approval or send.
 - Prepare redacted Linear issue links and create Linear issues only after an
   explicit operator-approved request.
 - Never commit message bodies, attachment contents, private forwarding
   destinations, or mailbox contents to git.
 
-Autonomous sending, live AI provider invocation, and autonomous Linear writes
-remain out of scope. Live outbound sends and Linear issue creation require a
-separate operator approval and evidence record.
+Autonomous sending and autonomous Linear writes remain out of scope. Live AI,
+outbound sends, and Linear issue creation require separate synthetic smoke and
+evidence records before processing real inquiries.
 
 ## References
 

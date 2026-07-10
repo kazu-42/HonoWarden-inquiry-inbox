@@ -5,8 +5,9 @@ import {
   recordInquiryEvent,
 } from "./repository";
 
-const promptVersion = "honowarden-inquiry-triage-v1";
-const modelId = "local-policy-v1";
+const promptVersion = "honowarden-inquiry-triage-v2";
+const localModelId = "local-policy-v1";
+const defaultWorkersAiModel = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const textEncoder = new TextEncoder();
 export const pendingTriageRecipient = "pending-recipient@redacted.invalid";
 
@@ -45,24 +46,45 @@ export async function createAiTriageRun(
     return jsonResponse({ error: input.error }, 400);
   }
 
-  const redacted = redactTriageText(input.value.text);
-  const classification = classifyRedactedInquiry({
+  const redactedSubject = redactTriageText(input.value.subject);
+  const redactedText = redactTriageText(input.value.text);
+  const localClassification = classifyRedactedInquiry({
     mailbox: input.value.mailbox,
-    subject: input.value.subject,
-    redactedText: redacted.text,
+    subject: redactedSubject.text,
+    redactedText: redactedText.text,
     escalationThreshold: parseThreshold(
       env.HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD,
       0.75,
     ),
   });
+  const generated = await generateTriageResult(env, {
+    mailbox: input.value.mailbox,
+    subject: redactedSubject.text,
+    text: redactedText.text,
+    localClassification,
+  });
+  if (!generated.ok) {
+    console.error(
+      JSON.stringify({
+        event: "inquiry.ai_provider_failed",
+        errorCode: generated.error,
+        status: generated.status,
+      }),
+    );
+    return jsonResponse({ error: generated.error }, generated.status);
+  }
+
+  const { classification, draftText, modelId } = generated.value;
   const createdAt = now.toISOString();
   const draftId = `draft_${crypto.randomUUID()}`;
   const runId = `ai_run_${crypto.randomUUID()}`;
-  const draftText = buildDraftSuggestion(classification);
   const toolCalls = [
     {
       name: "redact_context",
-      output: redacted.redactions,
+      output: {
+        subject: redactedSubject.redactions,
+        text: redactedText.redactions,
+      },
     },
     {
       name: "classify_inquiry",
@@ -86,7 +108,7 @@ export async function createAiTriageRun(
     toAddressHash: await sha256Hex(pendingTriageRecipient),
     fromAddress: input.value.from,
     replyToAddress: buildReplyToAddress(input.value.from, input.value.threadId),
-    subject: `Re: ${input.value.subject}`,
+    subject: `Re: ${redactedSubject.text}`,
     textBody: draftText,
     inReplyToHash: null,
     referencesHash: null,
@@ -103,9 +125,12 @@ export async function createAiTriageRun(
     modelId,
     redactedContextJson: JSON.stringify({
       mailbox: input.value.mailbox,
-      subject: input.value.subject,
-      text: redacted.text,
-      redactions: redacted.redactions,
+      subject: redactedSubject.text,
+      text: redactedText.text,
+      redactions: {
+        subject: redactedSubject.redactions,
+        text: redactedText.redactions,
+      },
     }),
     classification: classification.classification,
     confidence: classification.confidence,
@@ -137,8 +162,12 @@ export async function createAiTriageRun(
         promptVersion,
         modelId,
         redactedContext: {
-          text: redacted.text,
-          redactions: redacted.redactions,
+          subject: redactedSubject.text,
+          text: redactedText.text,
+          redactions: {
+            subject: redactedSubject.redactions,
+            text: redactedText.redactions,
+          },
         },
         ...classification,
         toolCalls,
@@ -149,6 +178,169 @@ export async function createAiTriageRun(
       },
     },
     201,
+  );
+}
+
+async function generateTriageResult(
+  env: InquiryBindings,
+  input: {
+    mailbox: string;
+    subject: string;
+    text: string;
+    localClassification: TriageClassificationResult;
+  },
+): Promise<
+  | {
+      ok: true;
+      value: {
+        classification: TriageClassificationResult;
+        draftText: string;
+        modelId: string;
+      };
+    }
+  | {
+      ok: false;
+      error: "ai_provider_unavailable" | "ai_provider_invalid_response";
+      status: 502 | 503;
+    }
+> {
+  if (env.HONOWARDEN_INQUIRY_AI_PROVIDER !== "workers-ai") {
+    return {
+      ok: true,
+      value: {
+        classification: input.localClassification,
+        draftText: buildDraftSuggestion(input.localClassification),
+        modelId: localModelId,
+      },
+    };
+  }
+
+  if (!env.AI) {
+    return { ok: false, error: "ai_provider_unavailable", status: 503 };
+  }
+
+  const modelId =
+    requiredString(env.HONOWARDEN_INQUIRY_AI_MODEL) ?? defaultWorkersAiModel;
+  let output: unknown;
+  try {
+    output = await (env.AI as unknown as WorkersAiBinding).run(modelId, {
+      messages: [
+        {
+          role: "system",
+          content: [
+            "Classify a redacted HonoWarden inquiry and draft a short acknowledgement.",
+            "Never request, repeat, or invent secrets, tokens, credentials, or private addresses.",
+            "The draft is advisory and always requires human approval before sending.",
+            "Return only the requested JSON object.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            mailbox: input.mailbox,
+            subject: input.subject,
+            text: input.text,
+          }),
+        },
+      ],
+      max_tokens: 500,
+      temperature: 0.1,
+      response_format: {
+        type: "json_schema",
+        json_schema: triageResponseSchema,
+      },
+    });
+  } catch {
+    return { ok: false, error: "ai_provider_unavailable", status: 502 };
+  }
+
+  const parsed = parseWorkersAiOutput(output);
+  if (!parsed) {
+    return { ok: false, error: "ai_provider_invalid_response", status: 502 };
+  }
+
+  const modelClassification = classificationResult(
+    parsed.classification,
+    parsed.confidence,
+  );
+  const classification =
+    input.localClassification.classification === "security_report"
+      ? input.localClassification
+      : modelClassification;
+
+  return {
+    ok: true,
+    value: {
+      classification,
+      draftText: redactTriageText(parsed.draftText).text,
+      modelId,
+    },
+  };
+}
+
+function parseWorkersAiOutput(value: unknown): WorkersAiTriageOutput | null {
+  if (!isRecord(value) || typeof value.response !== "string") {
+    return null;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value.response);
+    if (!isRecord(parsed)) {
+      return null;
+    }
+
+    const classification = parsed.classification;
+    const confidence = parsed.confidence;
+    const draftText = requiredString(parsed.draftText);
+    if (
+      !isInquiryClassification(classification) ||
+      typeof confidence !== "number" ||
+      !Number.isFinite(confidence) ||
+      confidence < 0 ||
+      confidence > 1 ||
+      !draftText
+    ) {
+      return null;
+    }
+
+    return { classification, confidence, draftText };
+  } catch {
+    return null;
+  }
+}
+
+function classificationResult(
+  classification: InquiryClassification,
+  confidence: number,
+): TriageClassificationResult {
+  const recommendedActions: Record<
+    InquiryClassification,
+    TriageClassificationResult["recommendedAction"]
+  > = {
+    security_report: "escalate_security",
+    support_request: "queue_support_review",
+    abuse_postmaster: "queue_ops_review",
+    general_inquiry: "queue_general_review",
+    noise_spam: "mark_noise",
+  };
+
+  return {
+    classification,
+    confidence,
+    recommendedAction: recommendedActions[classification],
+    requiresHumanApproval: true,
+  };
+}
+
+function isInquiryClassification(
+  value: unknown,
+): value is InquiryClassification {
+  return (
+    value === "security_report" ||
+    value === "support_request" ||
+    value === "abuse_postmaster" ||
+    value === "general_inquiry" ||
+    value === "noise_spam"
   );
 }
 
@@ -375,3 +567,33 @@ type TriageInput = {
   subject: string;
   text: string;
 };
+
+type WorkersAiBinding = {
+  run(model: string, input: Record<string, unknown>): Promise<unknown>;
+};
+
+type WorkersAiTriageOutput = {
+  classification: InquiryClassification;
+  confidence: number;
+  draftText: string;
+};
+
+const triageResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["classification", "confidence", "draftText"],
+  properties: {
+    classification: {
+      type: "string",
+      enum: [
+        "security_report",
+        "support_request",
+        "abuse_postmaster",
+        "general_inquiry",
+        "noise_spam",
+      ],
+    },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    draftText: { type: "string", minLength: 1, maxLength: 2000 },
+  },
+} as const;
