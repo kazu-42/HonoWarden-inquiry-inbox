@@ -1,0 +1,25 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "honowarden-inquiry-browser-test",
+  "main": "../../src/index.ts",
+  "compatibility_date": "2026-07-09",
+  "vars": {
+    "HONOWARDEN_INQUIRY_ENV": "development",
+    "HONOWARDEN_INQUIRY_OPERATORS": "browser-operator@example.test",
+  },
+  "d1_databases": [
+    {
+      "binding": "INQUIRY_DB",
+      "database_name": "honowarden-inquiry-browser-test",
+      "database_id": "00000000-0000-0000-0000-000000000120",
+      "migrations_dir": "../../migrations",
+    },
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["browser-sender@example.test"],
+      "allowed_destination_addresses": ["fixture-recipient@example.test"],
+    },
+  ],
+}

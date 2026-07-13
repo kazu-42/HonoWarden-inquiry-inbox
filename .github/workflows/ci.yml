@@ -40,3 +40,22 @@ jobs:
 
       - name: Format check
         run: pnpm format
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser test
+        run: pnpm test:browser
+        env:
+          HON120_REQUIRE_WRANGLER: "1"
+
+      - name: Upload Playwright evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: hon-120-playwright-evidence
+          path: |
+            test/.tmp/playwright-report/
+            test/.tmp/playwright-results/
+          if-no-files-found: ignore
+          retention-days: 7
