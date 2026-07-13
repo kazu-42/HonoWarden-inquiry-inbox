@@ -2,7 +2,66 @@ import { describe, expect, it } from "vitest";
 
 import worker from "../src/index";
 import type { InquiryBindings } from "../src/bindings";
-import { RecordingD1Database } from "./support/fakes";
+import { RecordingD1Database, type RecordedD1Run } from "./support/fakes";
+
+const humanOperatorHeaders = {
+  "Cf-Access-Authenticated-User-Email": "operator@example.test",
+};
+const serviceOperatorHeaders = {
+  "X-HonoWarden-Operator": "service:inquiry-automation",
+};
+
+type MutableDraftStatus = "draft" | "approved" | "sending" | "send_failed";
+
+type MutationCase = {
+  name: "edit" | "approve" | "reject" | "send" | "retry";
+  path: string;
+  method: "PATCH" | "POST";
+  status: MutableDraftStatus;
+  body: Record<string, unknown>;
+};
+
+const mutationCases = [
+  {
+    name: "edit",
+    path: "/api/drafts/draft_1",
+    method: "PATCH",
+    status: "draft",
+    body: { subject: "Re: Updated support", text: "updated reply body" },
+  },
+  {
+    name: "approve",
+    path: "/api/drafts/draft_1/approve",
+    method: "POST",
+    status: "draft",
+    body: {},
+  },
+  {
+    name: "reject",
+    path: "/api/drafts/draft_1/reject",
+    method: "POST",
+    status: "draft",
+    body: {},
+  },
+  {
+    name: "send",
+    path: "/api/drafts/draft_1/send",
+    method: "POST",
+    status: "approved",
+    body: {},
+  },
+  {
+    name: "retry",
+    path: "/api/drafts/draft_1/retry",
+    method: "POST",
+    status: "send_failed",
+    body: {},
+  },
+] satisfies readonly MutationCase[];
+
+const operatorOnlyMutationCases = mutationCases.filter(
+  (mutation) => mutation.name !== "edit",
+);
 
 describe("human-approved inquiry replies", () => {
   it("does not trust a forwarded identity header in production", async () => {
@@ -81,6 +140,7 @@ describe("human-approved inquiry replies", () => {
     expect(payload).toMatchObject({
       draft: {
         status: "draft",
+        version: 1,
         threadId: "thread_1",
         messageId: "message_1",
       },
@@ -97,6 +157,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "draft",
+      version: 1,
       to_address: "reporter@example.test",
       from_address: "support@honowarden.com",
       reply_to_address: "support+thread_1@honowarden.com",
@@ -114,6 +175,7 @@ describe("human-approved inquiry replies", () => {
           text: "updated reply body",
           to: "updated-reporter@example.test",
           from: "hello@honowarden.com",
+          version: 1,
         },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
         "PATCH",
@@ -129,6 +191,7 @@ describe("human-approved inquiry replies", () => {
       draft: {
         id: "draft_1",
         status: "draft",
+        version: 2,
       },
     });
     expect(JSON.stringify(payload)).not.toContain("updated reply body");
@@ -149,6 +212,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "draft",
+      version: 1,
       to_address: "reporter@example.test",
       from_address: "support@honowarden.com",
       reply_to_address: "support+thread_1@honowarden.com",
@@ -162,6 +226,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "draft",
+      version: 1,
       to_address: "reporter@example.test",
       from_address: "support@honowarden.com",
       reply_to_address: "support+thread_1@honowarden.com",
@@ -174,7 +239,7 @@ describe("human-approved inquiry replies", () => {
     const approved = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_1/approve",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "approver@example.test" },
       ),
       {
@@ -184,7 +249,7 @@ describe("human-approved inquiry replies", () => {
     const rejected = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_2/reject",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "reviewer@example.test" },
       ),
       {
@@ -194,11 +259,11 @@ describe("human-approved inquiry replies", () => {
 
     expect(approved.status).toBe(200);
     expect(await approved.json()).toMatchObject({
-      draft: { id: "draft_1", status: "approved" },
+      draft: { id: "draft_1", status: "approved", version: 2 },
     });
     expect(rejected.status).toBe(200);
     expect(await rejected.json()).toMatchObject({
-      draft: { id: "draft_2", status: "rejected" },
+      draft: { id: "draft_2", status: "rejected", version: 2 },
     });
     expect(approvalDatabase.boundValues).toContain("approved");
     expect(approvalDatabase.boundValues).toContain("approver@example.test");
@@ -213,6 +278,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "draft",
+      version: 1,
       to_address: pendingRecipient,
       from_address: "security@honowarden.com",
       reply_to_address: "security+thread_1@honowarden.com",
@@ -226,6 +292,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "approved",
+      version: 1,
       to_address: pendingRecipient,
       from_address: "security@honowarden.com",
       reply_to_address: "security+thread_1@honowarden.com",
@@ -239,7 +306,7 @@ describe("human-approved inquiry replies", () => {
     const approval = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_ai/approve",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
       ),
       {
@@ -249,7 +316,7 @@ describe("human-approved inquiry replies", () => {
     const send = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_ai/send",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
       ),
       {
@@ -284,6 +351,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "approved",
+      version: 1,
       to_address: "reporter@example.test",
       from_address: "support@honowarden.com",
       reply_to_address: "support+thread_1@honowarden.com",
@@ -297,15 +365,23 @@ describe("human-approved inquiry replies", () => {
     const response = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_1/send",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
         EMAIL: {
           async send(message: unknown): Promise<unknown> {
+            const transitions = draftUpdateRuns(database);
+            expect(transitions).toHaveLength(1);
+            expectDraftTransition(
+              transitions[0] as RecordedD1Run,
+              "approved",
+              "sending",
+              1,
+            );
             sentMessages.push(message);
-            return { success: true };
+            return { success: true, messageId: "provider-message-id" };
           },
         } as InquiryBindings["EMAIL"],
       } as InquiryBindings,
@@ -326,11 +402,20 @@ describe("human-approved inquiry replies", () => {
       draft: {
         id: "draft_1",
         status: "sent",
+        version: 3,
       },
     });
     expect(JSON.stringify(payload)).not.toContain("approved reply body");
     expect(database.queries.join("\n")).toContain("UPDATE inquiry_drafts SET");
     expect(database.boundValues).toContain("sent");
+    const transitions = draftUpdateRuns(database);
+    expect(transitions).toHaveLength(2);
+    expectDraftTransition(
+      transitions[1] as RecordedD1Run,
+      "sending",
+      "sent",
+      2,
+    );
     expect(database.boundValues.join("\n")).not.toContain(
       "reporter@example.test",
     );
@@ -342,6 +427,7 @@ describe("human-approved inquiry replies", () => {
       thread_id: "thread_1",
       message_id: "message_1",
       status: "approved",
+      version: 1,
       to_address: "reporter@example.test",
       from_address: "support@honowarden.com",
       reply_to_address: "support+thread_1@honowarden.com",
@@ -354,13 +440,21 @@ describe("human-approved inquiry replies", () => {
     const response = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_1/send",
-        {},
+        { version: 1 },
         { "Cf-Access-Authenticated-User-Email": "operator@example.test" },
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
         EMAIL: {
           async send(): Promise<unknown> {
+            const transitions = draftUpdateRuns(database);
+            expect(transitions).toHaveLength(1);
+            expectDraftTransition(
+              transitions[0] as RecordedD1Run,
+              "approved",
+              "sending",
+              1,
+            );
             throw Object.assign(
               new Error("provider leaked reporter@example.test"),
               { code: "E_SENDER_DOMAIN_NOT_AVAILABLE" },
@@ -377,11 +471,579 @@ describe("human-approved inquiry replies", () => {
     expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
     expect(database.boundValues).toContain("send_failed");
     expect(database.boundValues).toContain("E_SENDER_DOMAIN_NOT_AVAILABLE");
+    const transitions = draftUpdateRuns(database);
+    expect(transitions).toHaveLength(2);
+    expectDraftTransition(
+      transitions[1] as RecordedD1Run,
+      "sending",
+      "send_failed",
+      2,
+    );
     expect(database.boundValues.join("\n")).not.toContain(
       "provider leaked reporter@example.test",
     );
   });
+
+  it.each(mutationCases)(
+    "requires a version for $name mutations",
+    async (mutation) => {
+      const database = new RecordingD1Database(draftRecord(mutation.status));
+      let providerCalls = 0;
+
+      const response = await worker.fetch(
+        jsonRequest(
+          mutation.path,
+          mutationBody(mutation),
+          humanOperatorHeaders,
+          mutation.method,
+        ),
+        mutationBindings(database, () => {
+          providerCalls += 1;
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "invalid_version",
+      });
+      expect(database.completedRuns).toEqual([]);
+      expect(providerCalls).toBe(0);
+    },
+  );
+
+  it.each(mutationCases)(
+    "rejects invalid versions for $name mutations",
+    async (mutation) => {
+      for (const invalidVersion of [0, -1, 1.5, "1"]) {
+        const database = new RecordingD1Database(draftRecord(mutation.status));
+        let providerCalls = 0;
+
+        const response = await worker.fetch(
+          jsonRequest(
+            mutation.path,
+            mutationBody(mutation, invalidVersion),
+            humanOperatorHeaders,
+            mutation.method,
+          ),
+          mutationBindings(database, () => {
+            providerCalls += 1;
+          }),
+        );
+
+        expect(response.status).toBe(400);
+        await expect(response.json()).resolves.toEqual({
+          error: "invalid_version",
+        });
+        expect(database.completedRuns).toEqual([]);
+        expect(providerCalls).toBe(0);
+      }
+    },
+  );
+
+  it.each(mutationCases)(
+    "rejects a stale version for $name mutations",
+    async (mutation) => {
+      const database = new RecordingD1Database(
+        draftRecord(mutation.status),
+        [],
+        [0],
+      );
+      let providerCalls = 0;
+
+      const response = await worker.fetch(
+        jsonRequest(
+          mutation.path,
+          mutationBody(mutation, 1),
+          humanOperatorHeaders,
+          mutation.method,
+        ),
+        mutationBindings(database, () => {
+          providerCalls += 1;
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: "draft_version_conflict",
+      });
+      expect(database.completedRuns).toHaveLength(1);
+      expectCasRun(database.completedRuns[0] as RecordedD1Run, mutation.status);
+      expect(database.completedRuns[0]?.changes).toBe(0);
+      expect(providerCalls).toBe(0);
+    },
+  );
+
+  it("rejects a concurrent send before calling the provider", async () => {
+    const database = new RecordingD1Database(draftRecord("approved"), [], [0]);
+    let providerCalls = 0;
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      mutationBindings(database, () => {
+        providerCalls += 1;
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "draft_version_conflict",
+    });
+    expect(providerCalls).toBe(0);
+    expect(draftUpdateRuns(database)).toHaveLength(1);
+    expectDraftTransition(
+      draftUpdateRuns(database)[0] as RecordedD1Run,
+      "approved",
+      "sending",
+      1,
+    );
+    expect(database.completedRuns).toHaveLength(1);
+  });
+
+  it("allows only one provider call when two sends overlap", async () => {
+    const database = new RecordingD1Database(
+      draftRecord("approved"),
+      [],
+      [1, 0, 1, 1],
+    );
+    let releaseProvider: () => void = () => undefined;
+    let markProviderEntered: () => void = () => undefined;
+    const providerGate = new Promise<void>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const providerEntered = new Promise<void>((resolve) => {
+      markProviderEntered = resolve;
+    });
+    let providerCalls = 0;
+    const env = {
+      INQUIRY_DB: database as unknown as D1Database,
+      EMAIL: {
+        async send(): Promise<unknown> {
+          providerCalls += 1;
+          markProviderEntered();
+          await providerGate;
+          return { success: true, messageId: "provider-message-id" };
+        },
+      } as InquiryBindings["EMAIL"],
+    } as InquiryBindings;
+
+    const firstResponsePromise = worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      env,
+    );
+    await providerEntered;
+
+    const secondResponse = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      env,
+    );
+    expect(secondResponse.status).toBe(409);
+    await expect(secondResponse.json()).resolves.toEqual({
+      error: "draft_version_conflict",
+    });
+
+    releaseProvider();
+    const firstResponse = await firstResponsePromise;
+    expect(firstResponse.status).toBe(200);
+    expect(providerCalls).toBe(1);
+    expect(draftUpdateRuns(database)).toHaveLength(3);
+  });
+
+  it("leaves a send acquired when terminal persistence loses its CAS", async () => {
+    const database = new RecordingD1Database(
+      draftRecord("approved"),
+      [],
+      [1, 0],
+    );
+    let providerCalls = 0;
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      mutationBindings(database, () => {
+        providerCalls += 1;
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "draft_send_state_conflict",
+    });
+    expect(providerCalls).toBe(1);
+    expect(draftUpdateRuns(database)).toHaveLength(2);
+    expect(
+      database.completedRuns.filter((run) =>
+        /INSERT\s+INTO\s+inquiry_events/i.test(run.query),
+      ),
+    ).toEqual([]);
+  });
+
+  it("stores only a whitelisted provider error code after the sending CAS", async () => {
+    const invalidProviderCode =
+      "E_invalid-provider-code reporter@example.test raw-provider-text";
+    const database = new RecordingD1Database(draftRecord("approved"));
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      {
+        INQUIRY_DB: database as unknown as D1Database,
+        EMAIL: {
+          async send(): Promise<unknown> {
+            throw Object.assign(new Error("raw-provider-text"), {
+              code: invalidProviderCode,
+            });
+          },
+        } as InquiryBindings["EMAIL"],
+      } as InquiryBindings,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(payload).toEqual({ error: "email_send_failed" });
+    expect(database.boundValues).toContain("email_send_failed");
+    expect(database.boundValues).not.toContain(invalidProviderCode);
+    expect(database.boundValues.join("\n")).not.toContain("raw-provider-text");
+    expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
+    expect(JSON.stringify(payload)).not.toContain("private reply body");
+    const transitions = draftUpdateRuns(database);
+    expect(transitions).toHaveLength(2);
+    expectDraftTransition(
+      transitions[0] as RecordedD1Run,
+      "approved",
+      "sending",
+      1,
+    );
+    expectDraftTransition(
+      transitions[1] as RecordedD1Run,
+      "sending",
+      "send_failed",
+      2,
+    );
+  });
+
+  it("retries a structurally eligible failed send with a distinct audit event", async () => {
+    const database = new RecordingD1Database(
+      draftRecord("send_failed", {
+        last_error_code: "E_PROVIDER_UNAVAILABLE",
+      }),
+    );
+    const sentMessages: unknown[] = [];
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/retry",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      {
+        INQUIRY_DB: database as unknown as D1Database,
+        EMAIL: {
+          async send(message: unknown): Promise<unknown> {
+            const transitions = draftUpdateRuns(database);
+            expect(transitions).toHaveLength(1);
+            expectDraftTransition(
+              transitions[0] as RecordedD1Run,
+              "send_failed",
+              "sending",
+              1,
+            );
+            sentMessages.push(message);
+            return { success: true, messageId: "retry-provider-message-id" };
+          },
+        } as InquiryBindings["EMAIL"],
+      } as InquiryBindings,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      draft: { id: "draft_1", status: "sent", version: 3 },
+    });
+    expect(sentMessages).toHaveLength(1);
+    expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
+    expect(JSON.stringify(payload)).not.toContain("private reply body");
+    const transitions = draftUpdateRuns(database);
+    expect(transitions).toHaveLength(2);
+    expectDraftTransition(
+      transitions[1] as RecordedD1Run,
+      "sending",
+      "sent",
+      2,
+    );
+    const auditRuns = database.completedRuns.filter((run) =>
+      /INSERT\s+INTO\s+inquiry_events/i.test(run.query),
+    );
+    expect(auditRuns).toHaveLength(1);
+    expect(auditRuns[0]?.boundValues).toContain("draft_send_retry");
+  });
+
+  it.each([
+    ["a stuck sending draft", "sending", null],
+    ["a non-retryable failure", "send_failed", "E_SENDER_DOMAIN_NOT_AVAILABLE"],
+  ] as const)("refuses to retry %s", async (_name, status, errorCode) => {
+    const database = new RecordingD1Database(
+      draftRecord(status, { last_error_code: errorCode }),
+    );
+    let providerCalls = 0;
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/retry",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      mutationBindings(database, () => {
+        providerCalls += 1;
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "draft_retry_not_eligible",
+    });
+    expect(providerCalls).toBe(0);
+    expect(database.completedRuns).toEqual([]);
+  });
+
+  it("allows the service identity to create drafts", async () => {
+    const database = new RecordingD1Database();
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts",
+        {
+          threadId: "thread_1",
+          messageId: "message_1",
+          to: "reporter@example.test",
+          from: "support@honowarden.com",
+          subject: "Re: Support",
+          text: "service-created private reply body",
+        },
+        serviceOperatorHeaders,
+      ),
+      { INQUIRY_DB: database as unknown as D1Database } as InquiryBindings,
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload).toMatchObject({
+      draft: { status: "draft", version: 1 },
+    });
+    expect(database.boundValues).toContain("service:inquiry-automation");
+    expect(JSON.stringify(payload)).not.toContain(
+      "service-created private reply body",
+    );
+    expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
+  });
+
+  it.each(operatorOnlyMutationCases)(
+    "denies the service identity for $name",
+    async (mutation) => {
+      const database = new RecordingD1Database(draftRecord(mutation.status));
+      let providerCalls = 0;
+
+      const response = await worker.fetch(
+        jsonRequest(mutation.path, { version: 1 }, serviceOperatorHeaders),
+        mutationBindings(database, () => {
+          providerCalls += 1;
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: "operator_not_authorized",
+      });
+      expect(database.queries).toEqual([]);
+      expect(database.completedRuns).toEqual([]);
+      expect(providerCalls).toBe(0);
+    },
+  );
+
+  it("allows a human member of the configured operator allowlist", async () => {
+    const database = new RecordingD1Database(draftRecord("draft"));
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/approve",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      operatorBindings(database, "other@example.test, OPERATOR@EXAMPLE.TEST"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      draft: { id: "draft_1", status: "approved", version: 2 },
+    });
+  });
+
+  it("denies a human who is not in the configured operator allowlist", async () => {
+    const database = new RecordingD1Database(draftRecord("draft"));
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/approve",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      operatorBindings(database, "other@example.test"),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "operator_not_authorized",
+    });
+    expect(database.queries).toEqual([]);
+    expect(database.completedRuns).toEqual([]);
+  });
+
+  it.each([undefined, "", " , "])(
+    "keeps human mutations enabled when the operator allowlist is %s",
+    async (allowlist) => {
+      const database = new RecordingD1Database(draftRecord("draft"));
+
+      const response = await worker.fetch(
+        jsonRequest(
+          "/api/drafts/draft_1/approve",
+          { version: 1 },
+          humanOperatorHeaders,
+        ),
+        operatorBindings(database, allowlist),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        draft: { id: "draft_1", status: "approved", version: 2 },
+      });
+    },
+  );
 });
+
+type DraftRecord = {
+  id: string;
+  thread_id: string;
+  message_id: string;
+  status: MutableDraftStatus;
+  version: number;
+  to_address: string;
+  from_address: string;
+  reply_to_address: string;
+  subject: string;
+  text_body: string;
+  in_reply_to_hash: string | null;
+  references_hash: string | null;
+  last_error_code: string | null;
+};
+
+function draftRecord(
+  status: MutableDraftStatus,
+  overrides: Partial<DraftRecord> = {},
+): DraftRecord {
+  return {
+    id: "draft_1",
+    thread_id: "thread_1",
+    message_id: "message_1",
+    status,
+    version: 1,
+    to_address: "reporter@example.test",
+    from_address: "support@honowarden.com",
+    reply_to_address: "support+thread_1@honowarden.com",
+    subject: "Re: Support",
+    text_body: "private reply body",
+    in_reply_to_hash: null,
+    references_hash: null,
+    last_error_code: status === "send_failed" ? "E_PROVIDER_UNAVAILABLE" : null,
+    ...overrides,
+  };
+}
+
+function mutationBody(
+  mutation: MutationCase,
+  version?: unknown,
+): Record<string, unknown> {
+  return version === undefined
+    ? { ...mutation.body }
+    : { ...mutation.body, version };
+}
+
+function mutationBindings(
+  database: RecordingD1Database,
+  onSend: () => void,
+): InquiryBindings {
+  return {
+    INQUIRY_DB: database as unknown as D1Database,
+    EMAIL: {
+      async send(): Promise<unknown> {
+        onSend();
+        return { success: true, messageId: "provider-message-id" };
+      },
+    } as InquiryBindings["EMAIL"],
+  } as InquiryBindings;
+}
+
+function operatorBindings(
+  database: RecordingD1Database,
+  allowlist: string | undefined,
+): InquiryBindings {
+  const env = {
+    INQUIRY_DB: database as unknown as D1Database,
+  } as InquiryBindings & { HONOWARDEN_INQUIRY_OPERATORS?: string };
+
+  if (allowlist !== undefined) {
+    env.HONOWARDEN_INQUIRY_OPERATORS = allowlist;
+  }
+
+  return env;
+}
+
+function draftUpdateRuns(database: RecordingD1Database): RecordedD1Run[] {
+  return database.completedRuns.filter((run) =>
+    /UPDATE\s+inquiry_drafts\s+SET/i.test(run.query),
+  );
+}
+
+function expectCasRun(
+  run: RecordedD1Run,
+  fromStatus: string,
+  version = 1,
+): void {
+  expect(run.query).toMatch(/version\s*=\s*version\s*\+\s*1/i);
+  const whereClause = run.query.split(/\bWHERE\b/i)[1] ?? "";
+  expect(whereClause).toMatch(/\bid\b\s*=/i);
+  expect(whereClause).toMatch(/\bstatus\b\s*=/i);
+  expect(whereClause).toMatch(/\bversion\b\s*=/i);
+  expect(run.boundValues).toEqual(expect.arrayContaining(["draft_1", version]));
+  expect(`${run.query}\n${run.boundValues.join("\n")}`).toContain(fromStatus);
+}
+
+function expectDraftTransition(
+  run: RecordedD1Run,
+  fromStatus: string,
+  toStatus: string,
+  version: number,
+): void {
+  expectCasRun(run, fromStatus, version);
+  expect(run.boundValues).toContain(toStatus);
+  expect(run.boundValues).toContain(version);
+}
 
 function jsonRequest(
   path: string,

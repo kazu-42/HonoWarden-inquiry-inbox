@@ -61,25 +61,71 @@ export type InquiryDraftInput = {
   updatedAt: string;
 };
 
-export type InquiryDraftStatus =
-  "draft" | "approved" | "rejected" | "sent" | "send_failed";
+export const inquiryDraftStatuses = [
+  "draft",
+  "approved",
+  "rejected",
+  "sending",
+  "sent",
+  "send_failed",
+] as const;
+
+export type InquiryDraftStatus = (typeof inquiryDraftStatuses)[number];
 
 export type InquiryDraftRecord = {
   id: string;
   threadId: string;
   messageId: string | null;
   status: InquiryDraftStatus;
+  version: number;
   toAddress: string;
+  toAddressHash: string;
   fromAddress: string;
   replyToAddress: string;
   subject: string;
   textBody: string;
   inReplyToHash: string | null;
   referencesHash: string | null;
+  lastErrorCode: string | null;
+};
+
+export type InquiryDraftQueueRecord = {
+  id: string;
+  threadId: string;
+  messageId: string | null;
+  status: InquiryDraftStatus;
+  version: number;
+  toAddressHash: string;
+  subject: string;
+  createdBy: string;
+  approvedBy: string | null;
+  rejectedBy: string | null;
+  sentBy: string | null;
+  sentAt: string | null;
+  providerMessageIdHash: string | null;
+  lastErrorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  linearIssueId: string | null;
+  linearIssueIdentifier: string | null;
+  linearIssueUrl: string | null;
+};
+
+export type InquiryDraftQueueCursor = {
+  updatedAt: string;
+  id: string;
+};
+
+export type InquiryDraftQueueQuery = {
+  statuses: readonly InquiryDraftStatus[];
+  limit: number;
+  cursor: InquiryDraftQueueCursor | null;
 };
 
 export type InquiryDraftStatusUpdateInput = {
   id: string;
+  expectedStatus: InquiryDraftStatus;
+  expectedVersion: number;
   status: InquiryDraftStatus;
   operator: string;
   at: string;
@@ -89,6 +135,7 @@ export type InquiryDraftStatusUpdateInput = {
 
 export type InquiryDraftContentUpdateInput = {
   id: string;
+  expectedVersion: number;
   toAddress: string;
   toAddressHash: string;
   fromAddress: string;
@@ -381,13 +428,16 @@ export async function getInquiryDraft(
           thread_id,
           message_id,
           status,
+          version,
           to_address,
+          to_address_hash,
           from_address,
           reply_to_address,
           subject,
           text_body,
           in_reply_to_hash,
-          references_hash
+          references_hash,
+          last_error_code
         FROM inquiry_drafts
         WHERE id = ?
       `,
@@ -404,33 +454,136 @@ export async function getInquiryDraft(
     threadId: row.thread_id,
     messageId: row.message_id,
     status: row.status,
+    version: row.version,
     toAddress: row.to_address,
+    toAddressHash: row.to_address_hash,
     fromAddress: row.from_address,
     replyToAddress: row.reply_to_address,
     subject: row.subject,
     textBody: row.text_body,
     inReplyToHash: row.in_reply_to_hash,
     referencesHash: row.references_hash,
+    lastErrorCode: row.last_error_code,
   };
+}
+
+export async function listInquiryDraftQueue(
+  database: InquiryDatabase,
+  input: InquiryDraftQueueQuery,
+): Promise<InquiryDraftQueueRecord[]> {
+  const statusPlaceholders = input.statuses.map(() => "?").join(", ");
+  const cursorClause = input.cursor
+    ? `
+        AND (
+          d.updated_at < ?
+          OR (d.updated_at = ? AND d.id < ?)
+        )
+      `
+    : "";
+  const cursorBindings = input.cursor
+    ? [input.cursor.updatedAt, input.cursor.updatedAt, input.cursor.id]
+    : [];
+  const result = await database
+    .prepare(
+      `
+        SELECT
+          d.id,
+          d.thread_id,
+          d.message_id,
+          d.status,
+          d.version,
+          d.to_address_hash,
+          d.subject,
+          d.created_by,
+          d.approved_by,
+          d.rejected_by,
+          d.sent_by,
+          d.sent_at,
+          d.provider_message_id_hash,
+          d.last_error_code,
+          d.created_at,
+          d.updated_at,
+          links.linear_issue_id,
+          links.linear_issue_identifier,
+          links.linear_issue_url
+        FROM inquiry_drafts AS d
+        LEFT JOIN inquiry_linear_links AS links
+          ON links.thread_id = d.thread_id
+        WHERE d.status IN (${statusPlaceholders})
+        ${cursorClause}
+        ORDER BY d.updated_at DESC, d.id DESC
+        LIMIT ?
+      `,
+    )
+    .bind(...input.statuses, ...cursorBindings, input.limit)
+    .all<InquiryDraftQueueRow>();
+
+  return result.results.map(mapInquiryDraftQueueRow);
+}
+
+export async function getInquiryDraftQueueItem(
+  database: InquiryDatabase,
+  id: string,
+): Promise<InquiryDraftQueueRecord | null> {
+  const row = await database
+    .prepare(
+      `
+        SELECT
+          d.id,
+          d.thread_id,
+          d.message_id,
+          d.status,
+          d.version,
+          d.to_address_hash,
+          d.subject,
+          d.created_by,
+          d.approved_by,
+          d.rejected_by,
+          d.sent_by,
+          d.sent_at,
+          d.provider_message_id_hash,
+          d.last_error_code,
+          d.created_at,
+          d.updated_at,
+          links.linear_issue_id,
+          links.linear_issue_identifier,
+          links.linear_issue_url
+        FROM inquiry_drafts AS d
+        LEFT JOIN inquiry_linear_links AS links
+          ON links.thread_id = d.thread_id
+        WHERE d.id = ?
+      `,
+    )
+    .bind(id)
+    .first<InquiryDraftQueueRow>();
+
+  return row ? mapInquiryDraftQueueRow(row) : null;
 }
 
 export async function updateInquiryDraftStatus(
   database: InquiryDatabase,
   input: InquiryDraftStatusUpdateInput,
-): Promise<void> {
-  await database
+): Promise<boolean> {
+  const result = await database
     .prepare(
       `
         UPDATE inquiry_drafts SET
           status = ?,
           approved_by = CASE WHEN ? = 'approved' THEN ? ELSE approved_by END,
           rejected_by = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_by END,
-          sent_by = CASE WHEN ? IN ('sent', 'send_failed') THEN ? ELSE sent_by END,
-          sent_at = CASE WHEN ? IN ('sent', 'send_failed') THEN ? ELSE sent_at END,
-          provider_message_id_hash = ?,
-          last_error_code = ?,
-          updated_at = ?
+          sent_by = CASE WHEN ? IN ('sending', 'sent', 'send_failed') THEN ? ELSE sent_by END,
+          sent_at = CASE
+            WHEN ? = 'sent' THEN ?
+            WHEN ? = 'sending' THEN NULL
+            ELSE sent_at
+          END,
+          provider_message_id_hash = CASE WHEN ? = 'sending' THEN NULL ELSE ? END,
+          last_error_code = CASE WHEN ? = 'sending' THEN NULL ELSE ? END,
+          updated_at = ?,
+          version = version + 1
         WHERE id = ?
+        AND status = ?
+        AND version = ?
       `,
     )
     .bind(
@@ -443,19 +596,26 @@ export async function updateInquiryDraftStatus(
       input.operator,
       input.status,
       input.at,
+      input.status,
+      input.status,
       input.providerMessageIdHash ?? null,
+      input.status,
       input.lastErrorCode ?? null,
       input.at,
       input.id,
+      input.expectedStatus,
+      input.expectedVersion,
     )
     .run();
+
+  return result.meta.changes === 1;
 }
 
 export async function updateInquiryDraftContent(
   database: InquiryDatabase,
   input: InquiryDraftContentUpdateInput,
-): Promise<void> {
-  await database
+): Promise<boolean> {
+  const result = await database
     .prepare(
       `
         UPDATE inquiry_drafts SET
@@ -465,9 +625,11 @@ export async function updateInquiryDraftContent(
           reply_to_address = ?,
           subject = ?,
           text_body = ?,
-          updated_at = ?
+          updated_at = ?,
+          version = version + 1
         WHERE id = ?
         AND status = 'draft'
+        AND version = ?
       `,
     )
     .bind(
@@ -479,8 +641,11 @@ export async function updateInquiryDraftContent(
       input.textBody,
       input.updatedAt,
       input.id,
+      input.expectedVersion,
     )
     .run();
+
+  return result.meta.changes === 1;
 }
 
 export async function recordInquiryAiRun(
@@ -669,18 +834,69 @@ function mapInquiryLinearLink(
   };
 }
 
+function mapInquiryDraftQueueRow(
+  row: InquiryDraftQueueRow,
+): InquiryDraftQueueRecord {
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    messageId: row.message_id,
+    status: row.status,
+    version: row.version,
+    toAddressHash: row.to_address_hash,
+    subject: row.subject,
+    createdBy: row.created_by,
+    approvedBy: row.approved_by,
+    rejectedBy: row.rejected_by,
+    sentBy: row.sent_by,
+    sentAt: row.sent_at,
+    providerMessageIdHash: row.provider_message_id_hash,
+    lastErrorCode: row.last_error_code,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    linearIssueId: row.linear_issue_id,
+    linearIssueIdentifier: row.linear_issue_identifier,
+    linearIssueUrl: row.linear_issue_url,
+  };
+}
+
 type InquiryDraftRow = {
   id: string;
   thread_id: string;
   message_id: string | null;
   status: InquiryDraftStatus;
+  version: number;
   to_address: string;
+  to_address_hash: string;
   from_address: string;
   reply_to_address: string;
   subject: string;
   text_body: string;
   in_reply_to_hash: string | null;
   references_hash: string | null;
+  last_error_code: string | null;
+};
+
+type InquiryDraftQueueRow = {
+  id: string;
+  thread_id: string;
+  message_id: string | null;
+  status: InquiryDraftStatus;
+  version: number;
+  to_address_hash: string;
+  subject: string;
+  created_by: string;
+  approved_by: string | null;
+  rejected_by: string | null;
+  sent_by: string | null;
+  sent_at: string | null;
+  provider_message_id_hash: string | null;
+  last_error_code: string | null;
+  created_at: string;
+  updated_at: string;
+  linear_issue_id: string | null;
+  linear_issue_identifier: string | null;
+  linear_issue_url: string | null;
 };
 
 type InquiryLinearLinkRow = {
