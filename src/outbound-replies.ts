@@ -11,6 +11,7 @@ import {
   isRetryableEmailErrorCode,
   listOperatorDrafts,
 } from "./operator-queue";
+import { operatorQueuePageResponse } from "./operator-ui";
 import {
   getInquiryDraft,
   recordInquiryDraft,
@@ -28,12 +29,26 @@ export async function handleInquiryHttpRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url);
 
-  if (url.pathname.startsWith("/api/")) {
+  if (url.pathname.startsWith("/api/") || url.pathname === "/operator") {
     const auth = await authenticateInquiryAccess(request, env);
     if (!auth.ok) {
       return jsonResponse({ error: auth.error }, auth.status);
     }
     request = withVerifiedOperator(request, auth.operator);
+  }
+
+  if (url.pathname === "/operator") {
+    if (request.method !== "GET") {
+      return new Response(JSON.stringify({ error: "method_not_allowed" }), {
+        status: 405,
+        headers: {
+          Allow: "GET",
+          "Content-Type": "application/json",
+        },
+      });
+    }
+
+    return operatorQueuePageResponse();
   }
 
   if (url.pathname === "/api/drafts" && request.method === "POST") {
