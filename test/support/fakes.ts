@@ -8,33 +8,63 @@ export const fakeMeta = {
   changes: 1,
 } satisfies D1Meta & Record<string, unknown>;
 
+export type RecordedD1Run = {
+  query: string;
+  boundValues: readonly unknown[];
+  changes: number;
+};
+
 export class RecordingD1Database {
   readonly queries: string[] = [];
   readonly boundValues: unknown[] = [];
+  readonly completedRuns: RecordedD1Run[] = [];
+  private readonly runChanges: number[];
 
-  constructor(private readonly firstResult: unknown | null = null) {}
+  constructor(
+    private readonly firstResult: unknown | null = null,
+    private readonly allResults: readonly unknown[] = [],
+    runChanges: readonly number[] = [],
+  ) {
+    this.runChanges = [...runChanges];
+  }
 
   prepare(query: string): D1PreparedStatement {
     this.queries.push(query);
     const recordedBoundValues = this.boundValues;
+    const completedRuns = this.completedRuns;
     const firstResult = this.firstResult;
+    const allResults = this.allResults;
+    const runChanges = this.runChanges;
+    const statementBoundValues: unknown[] = [];
 
     const statement = {
       bind(...boundValues: unknown[]) {
         recordedBoundValues.push(...boundValues);
+        statementBoundValues.push(...boundValues);
         return statement as unknown as D1PreparedStatement;
       },
       async run(): Promise<D1Result> {
+        const changes = runChanges.shift() ?? fakeMeta.changes;
+        completedRuns.push({
+          query,
+          boundValues: [...statementBoundValues],
+          changes,
+        });
         return {
           success: true,
           results: [],
-          meta: fakeMeta,
+          meta: {
+            ...fakeMeta,
+            rows_written: changes,
+            changed_db: changes > 0,
+            changes,
+          },
         };
       },
       async all<T = unknown>(): Promise<D1Result<T>> {
         return {
           success: true,
-          results: [] as T[],
+          results: [...allResults] as T[],
           meta: fakeMeta,
         };
       },

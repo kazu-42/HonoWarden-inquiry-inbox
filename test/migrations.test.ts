@@ -16,6 +16,13 @@ const idempotencyMigration = readFileSync(
   "migrations/0005_inbound_idempotency.sql",
   "utf8",
 );
+const draftQueueMigration = readFileSync(
+  "migrations/0006_inquiry_draft_queue.sql",
+  "utf8",
+);
+
+const compactSql = (sql: string): string =>
+  sql.replace(/\s+/g, " ").replace(/\(\s+/g, "(").replace(/\s+\)/g, ")").trim();
 
 describe("inquiry mailbox migration", () => {
   it("creates metadata, message, and event tables", () => {
@@ -54,9 +61,6 @@ describe("inquiry mailbox migration", () => {
   it("adds human-approved reply drafts without API key columns", () => {
     expect(replyMigration).toContain(
       "CREATE TABLE IF NOT EXISTS inquiry_drafts",
-    );
-    expect(replyMigration).toContain(
-      "status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'rejected', 'sent', 'send_failed'))",
     );
     expect(replyMigration).toContain("approved_by TEXT");
     expect(replyMigration).toContain("sent_at TEXT");
@@ -104,5 +108,73 @@ describe("inquiry mailbox migration", () => {
     expect(idempotencyMigration).toContain("mailbox, message_id_hash");
     expect(idempotencyMigration).toContain("message_id_hash IS NOT NULL");
     expect(idempotencyMigration).not.toContain("message_id TEXT");
+  });
+
+  it("adds the persisted sending state and optimistic concurrency version", () => {
+    expect(draftQueueMigration).toContain(
+      "status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'rejected', 'sending', 'sent', 'send_failed'))",
+    );
+    expect(draftQueueMigration).toContain("version INTEGER NOT NULL DEFAULT 1");
+  });
+
+  it("copies every draft row and column into the rebuilt table", () => {
+    const draftColumns = [
+      "id",
+      "thread_id",
+      "message_id",
+      "status",
+      "to_address",
+      "to_address_hash",
+      "from_address",
+      "reply_to_address",
+      "subject",
+      "text_body",
+      "in_reply_to_hash",
+      "references_hash",
+      "created_by",
+      "approved_by",
+      "rejected_by",
+      "sent_by",
+      "sent_at",
+      "provider_message_id_hash",
+      "last_error_code",
+      "created_at",
+      "updated_at",
+    ];
+    const columns = draftColumns.join(", ");
+    const sql = compactSql(draftQueueMigration);
+
+    expect(sql).toContain(
+      `INSERT INTO inquiry_drafts_v2 (${columns}, version) SELECT ${columns}, 1 FROM inquiry_drafts;`,
+    );
+    expect(sql).toContain("DROP TABLE inquiry_drafts;");
+    expect(sql).toContain(
+      "ALTER TABLE inquiry_drafts_v2 RENAME TO inquiry_drafts;",
+    );
+  });
+
+  it("preserves draft links, foreign keys, and indexes after the rebuild", () => {
+    expect(draftQueueMigration).toContain(
+      "INSERT INTO inquiry_ai_run_draft_links_v2 (ai_run_id, draft_id)",
+    );
+    expect(draftQueueMigration).toContain("UPDATE inquiry_ai_runs");
+    expect(draftQueueMigration).toContain(
+      "FOREIGN KEY (thread_id) REFERENCES inquiry_threads(id) ON DELETE CASCADE",
+    );
+    expect(draftQueueMigration).toContain(
+      "FOREIGN KEY (message_id) REFERENCES inquiry_messages(id) ON DELETE SET NULL",
+    );
+    expect(draftQueueMigration).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_inquiry_drafts_thread_updated",
+    );
+    expect(draftQueueMigration).toContain(
+      "CREATE INDEX IF NOT EXISTS idx_inquiry_drafts_status_updated",
+    );
+  });
+
+  it("records the draft queue migration version", () => {
+    expect(compactSql(draftQueueMigration)).toContain(
+      "INSERT INTO schema_migrations (version) VALUES ('0006') ON CONFLICT(version) DO NOTHING;",
+    );
   });
 });

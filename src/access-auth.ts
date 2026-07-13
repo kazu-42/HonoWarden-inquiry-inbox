@@ -24,7 +24,7 @@ export async function authenticateInquiryAccess(
   verificationKey?: JWTVerifyGetKey,
 ): Promise<AccessAuthResult> {
   if (!requiresVerifiedAccess(env)) {
-    const operator = normalizeEmail(
+    const operator = normalizeDevelopmentOperator(
       request.headers.get("Cf-Access-Authenticated-User-Email") ??
         request.headers.get("X-HonoWarden-Operator"),
     );
@@ -130,6 +130,15 @@ function normalizeTeamDomain(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeDevelopmentOperator(value: unknown): string | null {
+  const normalized = requiredString(value)?.toLowerCase();
+  if (normalized === "service:inquiry-automation") {
+    return normalized;
+  }
+
+  return normalizeEmail(normalized);
 }
 
 function normalizeEmail(value: unknown): string | null {

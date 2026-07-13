@@ -29,4 +29,10 @@ describe("Wrangler AI configuration", () => {
     expect(wranglerConfig).toContain('"pattern": "inbox.honowarden.com"');
     expect(wranglerConfig.match(/"custom_domain": true/g)).toHaveLength(2);
   });
+
+  it("declares the optional operator allowlist in every environment", () => {
+    expect(
+      wranglerConfig.match(/"HONOWARDEN_INQUIRY_OPERATORS": ""/g),
+    ).toHaveLength(3);
+  });
 });

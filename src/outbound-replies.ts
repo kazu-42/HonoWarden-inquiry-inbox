@@ -7,6 +7,11 @@ import {
 import type { InquiryBindings } from "./bindings";
 import { createLinearIssueWorkflow } from "./linear-issues";
 import {
+  getOperatorDraft,
+  isRetryableEmailErrorCode,
+  listOperatorDrafts,
+} from "./operator-queue";
+import {
   getInquiryDraft,
   recordInquiryDraft,
   recordInquiryEvent,
@@ -35,6 +40,10 @@ export async function handleInquiryHttpRequest(
     return createDraft(request, env, now);
   }
 
+  if (url.pathname === "/api/drafts" && request.method === "GET") {
+    return listOperatorDrafts(request, env, now);
+  }
+
   if (url.pathname === "/api/triage-runs" && request.method === "POST") {
     return createAiTriageRun(request, env, now);
   }
@@ -49,42 +58,55 @@ export async function handleInquiryHttpRequest(
   }
 
   const draftMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)$/);
-  if (draftMatch && request.method === "PATCH") {
-    const draftId = draftMatch[1];
+  if (draftMatch && request.method === "GET") {
+    const draftId = decodePathSegment(draftMatch[1]);
     if (!draftId) {
       return jsonResponse({ error: "draft_not_found" }, 404);
     }
 
-    return editDraft(request, env, decodeURIComponent(draftId), now);
+    return getOperatorDraft(env, draftId, now);
+  }
+
+  if (draftMatch && request.method === "PATCH") {
+    const draftId = decodePathSegment(draftMatch[1]);
+    if (!draftId) {
+      return jsonResponse({ error: "draft_not_found" }, 404);
+    }
+
+    return editDraft(request, env, draftId, now);
   }
 
   const decisionMatch = url.pathname.match(
     /^\/api\/drafts\/([^/]+)\/(approve|reject)$/,
   );
   if (decisionMatch && request.method === "POST") {
-    const draftId = decisionMatch[1];
+    const draftId = decodePathSegment(decisionMatch[1]);
     const decision = decisionMatch[2];
     if (!draftId || (decision !== "approve" && decision !== "reject")) {
       return jsonResponse({ error: "draft_not_found" }, 404);
     }
 
-    return decideDraft(
-      request,
-      env,
-      decodeURIComponent(draftId),
-      decision,
-      now,
-    );
+    return decideDraft(request, env, draftId, decision, now);
   }
 
   const sendMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)\/send$/);
   if (sendMatch && request.method === "POST") {
-    const draftId = sendMatch[1];
+    const draftId = decodePathSegment(sendMatch[1]);
     if (!draftId) {
       return jsonResponse({ error: "draft_not_found" }, 404);
     }
 
-    return sendDraft(request, env, decodeURIComponent(draftId), now);
+    return sendDraft(request, env, draftId, "send", now);
+  }
+
+  const retryMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)\/retry$/);
+  if (retryMatch && request.method === "POST") {
+    const draftId = decodePathSegment(retryMatch[1]);
+    if (!draftId) {
+      return jsonResponse({ error: "draft_not_found" }, 404);
+    }
+
+    return sendDraft(request, env, draftId, "retry", now);
   }
 
   if (url.pathname.startsWith("/api/")) {
@@ -156,6 +178,7 @@ async function createDraft(
         threadId: draft.value.threadId,
         messageId: draft.value.messageId,
         status: "draft",
+        version: 1,
       },
     },
     201,
@@ -173,15 +196,23 @@ async function editDraft(
     return jsonResponse({ error: "operator_identity_required" }, 401);
   }
 
+  const body = await readJsonObject(request);
+  const version = requiredVersion(body.version);
+  if (!version) {
+    return jsonResponse({ error: "invalid_version" }, 400);
+  }
+
   const draft = await getInquiryDraft(env.INQUIRY_DB, draftId);
   if (!draft) {
     return jsonResponse({ error: "draft_not_found" }, 404);
+  }
+  if (draft.version !== version) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
   }
   if (draft.status !== "draft") {
     return jsonResponse({ error: "draft_not_editable" }, 409);
   }
 
-  const body = await readJsonObject(request);
   const subject = requiredString(body.subject);
   const text = requiredString(body.text);
   const to = optionalEmail(body.to);
@@ -202,8 +233,9 @@ async function editDraft(
   const updatedAt = now.toISOString();
   const toAddress = to ?? draft.toAddress;
   const fromAddress = from ?? draft.fromAddress;
-  await updateInquiryDraftContent(env.INQUIRY_DB, {
+  const updated = await updateInquiryDraftContent(env.INQUIRY_DB, {
     id: draft.id,
+    expectedVersion: version,
     toAddress,
     toAddressHash: await sha256Hex(toAddress),
     fromAddress,
@@ -212,6 +244,9 @@ async function editDraft(
     textBody: text,
     updatedAt,
   });
+  if (!updated) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
+  }
   await recordInquiryEvent(env.INQUIRY_DB, {
     id: crypto.randomUUID(),
     threadId: draft.threadId,
@@ -226,6 +261,7 @@ async function editDraft(
     draft: {
       id: draft.id,
       status: "draft",
+      version: version + 1,
     },
   });
 }
@@ -237,14 +273,23 @@ async function decideDraft(
   decision: "approve" | "reject",
   now: Date,
 ): Promise<Response> {
-  const operator = resolveOperatorIdentity(request);
-  if (!operator) {
-    return jsonResponse({ error: "operator_identity_required" }, 401);
+  const authorization = authorizeHumanOperator(request, env);
+  if (!authorization.ok) {
+    return jsonResponse({ error: authorization.error }, authorization.status);
+  }
+
+  const body = await readJsonObject(request);
+  const version = requiredVersion(body.version);
+  if (!version) {
+    return jsonResponse({ error: "invalid_version" }, 400);
   }
 
   const draft = await getInquiryDraft(env.INQUIRY_DB, draftId);
   if (!draft) {
     return jsonResponse({ error: "draft_not_found" }, 404);
+  }
+  if (draft.version !== version) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
   }
   if (draft.status !== "draft") {
     return jsonResponse({ error: "draft_not_reviewable" }, 409);
@@ -255,12 +300,17 @@ async function decideDraft(
 
   const status = decision === "approve" ? "approved" : "rejected";
   const decidedAt = now.toISOString();
-  await updateInquiryDraftStatus(env.INQUIRY_DB, {
+  const updated = await updateInquiryDraftStatus(env.INQUIRY_DB, {
     id: draft.id,
+    expectedStatus: "draft",
+    expectedVersion: version,
     status,
-    operator,
+    operator: authorization.operator,
     at: decidedAt,
   });
+  if (!updated) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
+  }
   await recordInquiryEvent(env.INQUIRY_DB, {
     id: crypto.randomUUID(),
     threadId: draft.threadId,
@@ -275,6 +325,7 @@ async function decideDraft(
     draft: {
       id: draft.id,
       status,
+      version: version + 1,
     },
   });
 }
@@ -283,29 +334,62 @@ async function sendDraft(
   request: Request,
   env: InquiryBindings,
   draftId: string,
+  mode: "send" | "retry",
   now: Date,
 ): Promise<Response> {
-  const operator = resolveOperatorIdentity(request);
-  if (!operator) {
-    return jsonResponse({ error: "operator_identity_required" }, 401);
+  const authorization = authorizeHumanOperator(request, env);
+  if (!authorization.ok) {
+    return jsonResponse({ error: authorization.error }, authorization.status);
   }
-  if (!env.EMAIL) {
-    return jsonResponse({ error: "email_binding_missing" }, 503);
+
+  const body = await readJsonObject(request);
+  const version = requiredVersion(body.version);
+  if (!version) {
+    return jsonResponse({ error: "invalid_version" }, 400);
   }
 
   const draft = await getInquiryDraft(env.INQUIRY_DB, draftId);
   if (!draft) {
     return jsonResponse({ error: "draft_not_found" }, 404);
   }
-  if (draft.status !== "approved") {
+  if (draft.version !== version) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
+  }
+  if (mode === "send" && draft.status !== "approved") {
     return jsonResponse({ error: "draft_not_approved" }, 409);
+  }
+  if (
+    mode === "retry" &&
+    (draft.status !== "send_failed" ||
+      !isRetryableEmailErrorCode(draft.lastErrorCode))
+  ) {
+    return jsonResponse({ error: "draft_retry_not_eligible" }, 409);
   }
   if (draft.toAddress === pendingTriageRecipient) {
     return jsonResponse({ error: "draft_recipient_required" }, 409);
   }
+  if (!env.EMAIL) {
+    return jsonResponse({ error: "email_binding_missing" }, 503);
+  }
 
   const sentAt = now.toISOString();
-  let result: EmailSendResult;
+  const sourceStatus = mode === "send" ? "approved" : "send_failed";
+  const acquired = await updateInquiryDraftStatus(env.INQUIRY_DB, {
+    id: draft.id,
+    expectedStatus: sourceStatus,
+    expectedVersion: version,
+    status: "sending",
+    operator: authorization.operator,
+    at: sentAt,
+  });
+  if (!acquired) {
+    return jsonResponse({ error: "draft_version_conflict" }, 409);
+  }
+
+  const acquiredVersion = version + 1;
+  const eventType = mode === "send" ? "draft_send" : "draft_send_retry";
+  let result: EmailSendResult | null = null;
+  let providerErrorCode: string | null = null;
 
   try {
     result = await env.EMAIL.send({
@@ -320,25 +404,33 @@ async function sendDraft(
       },
     });
   } catch (error) {
-    const providerErrorCode = resolveEmailSendErrorCode(error);
+    providerErrorCode = resolveEmailSendErrorCode(error);
     console.error(
       JSON.stringify({
         event: "inquiry.email_send_failed",
         providerErrorCode,
       }),
     );
-    await updateInquiryDraftStatus(env.INQUIRY_DB, {
+  }
+
+  if (providerErrorCode) {
+    const completed = await updateInquiryDraftStatus(env.INQUIRY_DB, {
       id: draft.id,
+      expectedStatus: "sending",
+      expectedVersion: acquiredVersion,
       status: "send_failed",
-      operator,
+      operator: authorization.operator,
       at: sentAt,
       lastErrorCode: providerErrorCode,
     });
+    if (!completed) {
+      return sendStateConflictResponse(draft.id, "send_failed");
+    }
     await recordInquiryEvent(env.INQUIRY_DB, {
       id: crypto.randomUUID(),
       threadId: draft.threadId,
       messageId: draft.messageId,
-      eventType: "draft_send",
+      eventType,
       status: "send_failed",
       metadataJson: JSON.stringify({
         draftId: draft.id,
@@ -350,20 +442,26 @@ async function sendDraft(
     return jsonResponse({ error: "email_send_failed" }, 502);
   }
 
-  await updateInquiryDraftStatus(env.INQUIRY_DB, {
+  const providerMessageIdHash = result?.messageId
+    ? await sha256Hex(result.messageId)
+    : null;
+  const completed = await updateInquiryDraftStatus(env.INQUIRY_DB, {
     id: draft.id,
+    expectedStatus: "sending",
+    expectedVersion: acquiredVersion,
     status: "sent",
-    operator,
+    operator: authorization.operator,
     at: sentAt,
-    providerMessageIdHash: result.messageId
-      ? await sha256Hex(result.messageId)
-      : null,
+    providerMessageIdHash,
   });
+  if (!completed) {
+    return sendStateConflictResponse(draft.id, "sent");
+  }
   await recordInquiryEvent(env.INQUIRY_DB, {
     id: crypto.randomUUID(),
     threadId: draft.threadId,
     messageId: draft.messageId,
-    eventType: "draft_send",
+    eventType,
     status: "sent",
     metadataJson: JSON.stringify({ draftId: draft.id }),
     occurredAt: sentAt,
@@ -373,8 +471,23 @@ async function sendDraft(
     draft: {
       id: draft.id,
       status: "sent",
+      version: acquiredVersion + 1,
     },
   });
+}
+
+function sendStateConflictResponse(
+  draftId: string,
+  targetStatus: "sent" | "send_failed",
+): Response {
+  console.error(
+    JSON.stringify({
+      event: "inquiry.email_send_state_conflict",
+      draftId,
+      targetStatus,
+    }),
+  );
+  return jsonResponse({ error: "draft_send_state_conflict" }, 503);
 }
 
 function resolveEmailSendErrorCode(error: unknown): string {
@@ -398,6 +511,55 @@ function resolveOperatorIdentity(request: Request): string | null {
   return normalized.includes("@") || normalized === "service:inquiry-automation"
     ? normalized
     : null;
+}
+
+function decodePathSegment(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded.length > 0 ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function authorizeHumanOperator(
+  request: Request,
+  env: InquiryBindings,
+):
+  | { ok: true; operator: string }
+  | {
+      ok: false;
+      error: "operator_identity_required" | "operator_not_authorized";
+      status: 401 | 403;
+    } {
+  const operator = resolveOperatorIdentity(request);
+  if (!operator) {
+    return {
+      ok: false,
+      error: "operator_identity_required",
+      status: 401,
+    };
+  }
+  if (operator === "service:inquiry-automation") {
+    return { ok: false, error: "operator_not_authorized", status: 403 };
+  }
+
+  const configuredOperators = (env.HONOWARDEN_INQUIRY_OPERATORS ?? "")
+    .split(",")
+    .map((identity) => identity.trim().toLowerCase())
+    .filter((identity) => identity.length > 0);
+  if (
+    configuredOperators.length > 0 &&
+    !configuredOperators.includes(operator)
+  ) {
+    return { ok: false, error: "operator_not_authorized", status: 403 };
+  }
+
+  return { ok: true, operator };
 }
 
 async function readJsonObject(
@@ -472,6 +634,12 @@ async function sha256Hex(value: string): Promise<string> {
 function requiredString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
+    : null;
+}
+
+function requiredVersion(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
     : null;
 }
 
