@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import worker from "../src/index";
 import type { InquiryBindings } from "../src/bindings";
@@ -64,6 +64,10 @@ const operatorOnlyMutationCases = mutationCases.filter(
 );
 
 describe("human-approved inquiry replies", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("does not trust a forwarded identity header in production", async () => {
     const database = new RecordingD1Database();
 
@@ -301,7 +305,8 @@ describe("human-approved inquiry replies", () => {
       in_reply_to_hash: null,
       references_hash: null,
     });
-    const sentMessages: unknown[] = [];
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
 
     const approval = await worker.fetch(
       jsonRequest(
@@ -321,12 +326,7 @@ describe("human-approved inquiry replies", () => {
       ),
       {
         INQUIRY_DB: sendDatabase as unknown as D1Database,
-        EMAIL: {
-          async send(message: unknown): Promise<unknown> {
-            sentMessages.push(message);
-            return { success: true };
-          },
-        } as InquiryBindings["EMAIL"],
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
       } as InquiryBindings,
     );
 
@@ -336,7 +336,7 @@ describe("human-approved inquiry replies", () => {
     });
     expect(send.status).toBe(409);
     expect(await send.json()).toEqual({ error: "draft_recipient_required" });
-    expect(sentMessages).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(approvalDatabase.queries.join("\n")).not.toContain(
       "UPDATE inquiry_drafts SET",
     );
@@ -345,7 +345,7 @@ describe("human-approved inquiry replies", () => {
     );
   });
 
-  it("sends only approved drafts through the Email Service binding", async () => {
+  it("sends only approved drafts through Resend", async () => {
     const database = new RecordingD1Database({
       id: "draft_1",
       thread_id: "thread_1",
@@ -360,7 +360,21 @@ describe("human-approved inquiry replies", () => {
       in_reply_to_hash: "in-reply-to-hash",
       references_hash: "references-hash",
     });
-    const sentMessages: unknown[] = [];
+    const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) => {
+      const transitions = draftUpdateRuns(database);
+      expect(transitions).toHaveLength(1);
+      expectDraftTransition(
+        transitions[0] as RecordedD1Run,
+        "approved",
+        "sending",
+        1,
+      );
+      return new Response(JSON.stringify({ id: "provider-message-id" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
 
     const response = await worker.fetch(
       jsonRequest(
@@ -370,33 +384,31 @@ describe("human-approved inquiry replies", () => {
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
-        EMAIL: {
-          async send(message: unknown): Promise<unknown> {
-            const transitions = draftUpdateRuns(database);
-            expect(transitions).toHaveLength(1);
-            expectDraftTransition(
-              transitions[0] as RecordedD1Run,
-              "approved",
-              "sending",
-              1,
-            );
-            sentMessages.push(message);
-            return { success: true, messageId: "provider-message-id" };
-          },
-        } as InquiryBindings["EMAIL"],
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
       } as InquiryBindings,
     );
 
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0]).toMatchObject({
-      to: "reporter@example.test",
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.resend.com/emails");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toMatchObject({
+      authorization: "Bearer re_test_synthetic",
+      "content-type": "application/json",
+    });
+    expect(JSON.parse(String(init.body))).toEqual({
       from: "support@honowarden.com",
-      replyTo: "support+thread_1@honowarden.com",
+      to: ["reporter@example.test"],
+      reply_to: "support+thread_1@honowarden.com",
       subject: "Re: Support",
       text: "approved reply body",
+      headers: {
+        "X-HonoWarden-Inquiry-Thread": "thread_1",
+        "X-HonoWarden-Inquiry-Draft": "draft_1",
+      },
     });
     expect(payload).toMatchObject({
       draft: {
@@ -406,8 +418,13 @@ describe("human-approved inquiry replies", () => {
       },
     });
     expect(JSON.stringify(payload)).not.toContain("approved reply body");
+    expect(JSON.stringify(payload)).not.toContain("re_test_synthetic");
     expect(database.queries.join("\n")).toContain("UPDATE inquiry_drafts SET");
     expect(database.boundValues).toContain("sent");
+    expect(database.boundValues).toContain(
+      "236e7e3eba1c76e7d8c0e05dbd613e3576339b1d540624274d3e129d73b790ea",
+    );
+    expect(database.boundValues).not.toContain("provider-message-id");
     const transitions = draftUpdateRuns(database);
     expect(transitions).toHaveLength(2);
     expectDraftTransition(
@@ -419,6 +436,11 @@ describe("human-approved inquiry replies", () => {
     expect(database.boundValues.join("\n")).not.toContain(
       "reporter@example.test",
     );
+    expect(database.boundValues.join("\n")).not.toContain(
+      "approved reply body",
+    );
+    expect(database.boundValues.join("\n")).not.toContain("re_test_synthetic");
+    expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
   });
 
   it("records send failures without echoing provider errors or draft bodies", async () => {
@@ -437,6 +459,27 @@ describe("human-approved inquiry replies", () => {
       references_hash: null,
     });
 
+    const providerBodyText =
+      "The honowarden.com domain is not verified. reporter@example.test";
+    const providerResponse = new Response(
+      JSON.stringify({ message: providerBodyText }),
+      { status: 403 },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const transitions = draftUpdateRuns(database);
+        expect(transitions).toHaveLength(1);
+        expectDraftTransition(
+          transitions[0] as RecordedD1Run,
+          "approved",
+          "sending",
+          1,
+        );
+        return providerResponse;
+      }),
+    );
+
     const response = await worker.fetch(
       jsonRequest(
         "/api/drafts/draft_1/send",
@@ -445,22 +488,7 @@ describe("human-approved inquiry replies", () => {
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
-        EMAIL: {
-          async send(): Promise<unknown> {
-            const transitions = draftUpdateRuns(database);
-            expect(transitions).toHaveLength(1);
-            expectDraftTransition(
-              transitions[0] as RecordedD1Run,
-              "approved",
-              "sending",
-              1,
-            );
-            throw Object.assign(
-              new Error("provider leaked reporter@example.test"),
-              { code: "E_SENDER_DOMAIN_NOT_AVAILABLE" },
-            );
-          },
-        } as InquiryBindings["EMAIL"],
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
       } as InquiryBindings,
     );
     const payload = await response.json();
@@ -469,6 +497,8 @@ describe("human-approved inquiry replies", () => {
     expect(payload).toEqual({ error: "email_send_failed" });
     expect(JSON.stringify(payload)).not.toContain("approved reply body");
     expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
+    expect(JSON.stringify(payload)).not.toContain(providerBodyText);
+    expect(JSON.stringify(payload)).not.toContain("re_test_synthetic");
     expect(database.boundValues).toContain("send_failed");
     expect(database.boundValues).toContain("E_SENDER_DOMAIN_NOT_AVAILABLE");
     const transitions = draftUpdateRuns(database);
@@ -479,9 +509,40 @@ describe("human-approved inquiry replies", () => {
       "send_failed",
       2,
     );
+    expect(database.boundValues.join("\n")).not.toContain(providerBodyText);
     expect(database.boundValues.join("\n")).not.toContain(
-      "provider leaked reporter@example.test",
+      "reporter@example.test",
     );
+    expect(database.boundValues.join("\n")).not.toContain(
+      "approved reply body",
+    );
+    expect(database.boundValues.join("\n")).not.toContain("re_test_synthetic");
+    expect(providerResponse.bodyUsed).toBe(false);
+  });
+
+  it("fails closed without Resend configuration before acquiring the draft", async () => {
+    const database = new RecordingD1Database(draftRecord("approved"));
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const response = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      {
+        INQUIRY_DB: database as unknown as D1Database,
+      } as InquiryBindings,
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "email_not_configured",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(draftUpdateRuns(database)).toHaveLength(0);
+    expect(database.queries.join("\n")).not.toMatch(/UPDATE\s+inquiry_drafts/i);
   });
 
   it.each(mutationCases)(
@@ -618,16 +679,21 @@ describe("human-approved inquiry replies", () => {
       markProviderEntered = resolve;
     });
     let providerCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        providerCalls += 1;
+        markProviderEntered();
+        await providerGate;
+        return new Response(JSON.stringify({ id: "provider-message-id" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
     const env = {
       INQUIRY_DB: database as unknown as D1Database,
-      EMAIL: {
-        async send(): Promise<unknown> {
-          providerCalls += 1;
-          markProviderEntered();
-          await providerGate;
-          return { success: true, messageId: "provider-message-id" };
-        },
-      } as InquiryBindings["EMAIL"],
+      HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
     } as InquiryBindings;
 
     const firstResponsePromise = worker.fetch(
@@ -693,9 +759,17 @@ describe("human-approved inquiry replies", () => {
   });
 
   it("stores only a whitelisted provider error code after the sending CAS", async () => {
-    const invalidProviderCode =
-      "E_invalid-provider-code reporter@example.test raw-provider-text";
+    const providerBodyText =
+      "E_not-a-real-code reporter@example.test raw-provider-text";
     const database = new RecordingD1Database(draftRecord("approved"));
+    const providerResponse = new Response(
+      JSON.stringify({ message: providerBodyText }),
+      { status: 400 },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => providerResponse),
+    );
 
     const response = await worker.fetch(
       jsonRequest(
@@ -705,13 +779,7 @@ describe("human-approved inquiry replies", () => {
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
-        EMAIL: {
-          async send(): Promise<unknown> {
-            throw Object.assign(new Error("raw-provider-text"), {
-              code: invalidProviderCode,
-            });
-          },
-        } as InquiryBindings["EMAIL"],
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
       } as InquiryBindings,
     );
     const payload = await response.json();
@@ -719,10 +787,17 @@ describe("human-approved inquiry replies", () => {
     expect(response.status).toBe(502);
     expect(payload).toEqual({ error: "email_send_failed" });
     expect(database.boundValues).toContain("email_send_failed");
-    expect(database.boundValues).not.toContain(invalidProviderCode);
+    expect(database.boundValues).not.toContain(providerBodyText);
     expect(database.boundValues.join("\n")).not.toContain("raw-provider-text");
+    expect(database.boundValues.join("\n")).not.toContain("E_not-a-real-code");
+    expect(database.boundValues.join("\n")).not.toContain(
+      "reporter@example.test",
+    );
+    expect(database.boundValues.join("\n")).not.toContain("private reply body");
+    expect(database.boundValues.join("\n")).not.toContain("re_test_synthetic");
     expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
     expect(JSON.stringify(payload)).not.toContain("private reply body");
+    expect(providerResponse.bodyUsed).toBe(false);
     const transitions = draftUpdateRuns(database);
     expect(transitions).toHaveLength(2);
     expectDraftTransition(
@@ -739,13 +814,109 @@ describe("human-approved inquiry replies", () => {
     );
   });
 
+  it("allows an operator to retry a Resend rate-limit failure", async () => {
+    const sendDatabase = new RecordingD1Database(draftRecord("approved"));
+    const retryDatabase = new RecordingD1Database(
+      draftRecord("send_failed", {
+        version: 3,
+        last_error_code: "E_PROVIDER_RATE_LIMITED",
+      }),
+    );
+    let providerAttempts = 0;
+    const fetchSpy = vi.fn(async () => {
+      providerAttempts += 1;
+      if (providerAttempts === 1) {
+        return new Response(null, { status: 429 });
+      }
+      return new Response(JSON.stringify({ id: "retry-provider-message-id" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const sendResponse = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/send",
+        { version: 1 },
+        humanOperatorHeaders,
+      ),
+      {
+        INQUIRY_DB: sendDatabase as unknown as D1Database,
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
+      } as InquiryBindings,
+    );
+
+    expect(sendResponse.status).toBe(502);
+    await expect(sendResponse.json()).resolves.toEqual({
+      error: "email_send_failed",
+    });
+    expect(sendDatabase.boundValues).toContain("E_PROVIDER_RATE_LIMITED");
+    expectDraftTransition(
+      draftUpdateRuns(sendDatabase)[0] as RecordedD1Run,
+      "approved",
+      "sending",
+      1,
+    );
+    expectDraftTransition(
+      draftUpdateRuns(sendDatabase)[1] as RecordedD1Run,
+      "sending",
+      "send_failed",
+      2,
+    );
+
+    const retryResponse = await worker.fetch(
+      jsonRequest(
+        "/api/drafts/draft_1/retry",
+        { version: 3 },
+        humanOperatorHeaders,
+      ),
+      {
+        INQUIRY_DB: retryDatabase as unknown as D1Database,
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
+      } as InquiryBindings,
+    );
+
+    expect(retryResponse.status).toBe(200);
+    await expect(retryResponse.json()).resolves.toMatchObject({
+      draft: { id: "draft_1", status: "sent", version: 5 },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expectDraftTransition(
+      draftUpdateRuns(retryDatabase)[0] as RecordedD1Run,
+      "send_failed",
+      "sending",
+      3,
+    );
+    expectDraftTransition(
+      draftUpdateRuns(retryDatabase)[1] as RecordedD1Run,
+      "sending",
+      "sent",
+      4,
+    );
+  });
+
   it("retries a structurally eligible failed send with a distinct audit event", async () => {
     const database = new RecordingD1Database(
       draftRecord("send_failed", {
         last_error_code: "E_PROVIDER_UNAVAILABLE",
       }),
     );
-    const sentMessages: unknown[] = [];
+    const fetchSpy = vi.fn(async () => {
+      const transitions = draftUpdateRuns(database);
+      expect(transitions).toHaveLength(1);
+      expectDraftTransition(
+        transitions[0] as RecordedD1Run,
+        "send_failed",
+        "sending",
+        1,
+      );
+      return new Response(JSON.stringify({ id: "retry-provider-message-id" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
 
     const response = await worker.fetch(
       jsonRequest(
@@ -755,20 +926,7 @@ describe("human-approved inquiry replies", () => {
       ),
       {
         INQUIRY_DB: database as unknown as D1Database,
-        EMAIL: {
-          async send(message: unknown): Promise<unknown> {
-            const transitions = draftUpdateRuns(database);
-            expect(transitions).toHaveLength(1);
-            expectDraftTransition(
-              transitions[0] as RecordedD1Run,
-              "send_failed",
-              "sending",
-              1,
-            );
-            sentMessages.push(message);
-            return { success: true, messageId: "retry-provider-message-id" };
-          },
-        } as InquiryBindings["EMAIL"],
+        HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
       } as InquiryBindings,
     );
     const payload = await response.json();
@@ -777,7 +935,7 @@ describe("human-approved inquiry replies", () => {
     expect(payload).toMatchObject({
       draft: { id: "draft_1", status: "sent", version: 3 },
     });
-    expect(sentMessages).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(payload)).not.toContain("reporter@example.test");
     expect(JSON.stringify(payload)).not.toContain("private reply body");
     const transitions = draftUpdateRuns(database);
@@ -988,14 +1146,20 @@ function mutationBindings(
   database: RecordingD1Database,
   onSend: () => void,
 ): InquiryBindings {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      onSend();
+      return new Response(JSON.stringify({ id: "provider-message-id" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+
   return {
     INQUIRY_DB: database as unknown as D1Database,
-    EMAIL: {
-      async send(): Promise<unknown> {
-        onSend();
-        return { success: true, messageId: "provider-message-id" };
-      },
-    } as InquiryBindings["EMAIL"],
+    HONOWARDEN_RESEND_API_KEY: "re_test_synthetic",
   } as InquiryBindings;
 }
 

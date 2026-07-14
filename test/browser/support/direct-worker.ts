@@ -14,9 +14,11 @@ export const browserBaseURL = directBridgeEnabled
 
 const operatorHeader = "X-HonoWarden-Operator";
 const authorizedOperator = "browser-operator@example.test";
+const resendEndpoint = "https://api.resend.com/emails";
 const bridgedPages = new WeakSet<Page>();
 let database: DatabaseSync | null = null;
 let bindings: InquiryBindings | null = null;
+let originalFetch: typeof globalThis.fetch | null = null;
 
 export function initializeDirectWorker(): void {
   if (!directBridgeEnabled || database) {
@@ -35,19 +37,37 @@ export function initializeDirectWorker(): void {
     readFileSync(resolve(process.cwd(), "test/browser/seed.sql"), "utf8"),
   );
 
+  originalFetch = globalThis.fetch;
+  const passthroughFetch = originalFetch;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (url === resendEndpoint) {
+      return Response.json(
+        { id: "synthetic-browser-provider-id" },
+        { status: 200 },
+      );
+    }
+    return passthroughFetch(input, init);
+  };
+
   bindings = {
     INQUIRY_DB: new SqliteD1Database(database) as unknown as D1Database,
-    EMAIL: {
-      async send(): Promise<{ messageId: string }> {
-        return { messageId: "synthetic-browser-provider-id" };
-      },
-    } as unknown as SendEmail,
+    HONOWARDEN_RESEND_API_KEY: "re_synthetic_browser",
     HONOWARDEN_INQUIRY_ENV: "development",
     HONOWARDEN_INQUIRY_OPERATORS: authorizedOperator,
   };
 }
 
 export function disposeDirectWorker(): void {
+  if (originalFetch) {
+    globalThis.fetch = originalFetch;
+    originalFetch = null;
+  }
   database?.close();
   database = null;
   bindings = null;

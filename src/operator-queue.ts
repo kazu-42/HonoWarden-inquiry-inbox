@@ -11,7 +11,10 @@ import {
 const defaultPageLimit = 25;
 const maximumPageLimit = 100;
 const subjectPreviewLength = 64;
-const retryableEmailErrorCodes = new Set(["E_PROVIDER_UNAVAILABLE"]);
+const retryableEmailErrorCodes = new Set([
+  "E_PROVIDER_UNAVAILABLE",
+  "E_PROVIDER_RATE_LIMITED",
+]);
 
 type QueueCursorPayload = InquiryDraftQueueCursor & {
   statuses: InquiryDraftStatus[];

@@ -1,8 +1,8 @@
 export type InquiryBindings = {
   AI?: Ai;
   INQUIRY_DB: D1Database;
-  EMAIL?: SendEmail;
   INQUIRY_OBJECTS?: R2Bucket;
+  HONOWARDEN_RESEND_API_KEY?: string;
   HONOWARDEN_INQUIRY_ENV?: string;
   HONOWARDEN_INQUIRY_AI_ESCALATION_THRESHOLD?: string;
   HONOWARDEN_INQUIRY_AI_MODEL?: string;

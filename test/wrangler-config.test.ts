@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const wranglerConfig = readFileSync("wrangler.jsonc", "utf8");
+const browserWranglerConfig = readFileSync(
+  "test/browser/wrangler.jsonc",
+  "utf8",
+);
 
 describe("Wrangler AI configuration", () => {
   it("configures Workers AI for root, staging, and production", () => {
@@ -34,5 +38,15 @@ describe("Wrangler AI configuration", () => {
     expect(
       wranglerConfig.match(/"HONOWARDEN_INQUIRY_OPERATORS": ""/g),
     ).toHaveLength(3);
+  });
+});
+
+describe("Wrangler outbound email configuration", () => {
+  it("uses a runtime Resend secret without retaining send_email bindings", () => {
+    expect(wranglerConfig).not.toContain('"send_email"');
+    expect(wranglerConfig).not.toContain('"HONOWARDEN_RESEND_API_KEY"');
+    expect(browserWranglerConfig).not.toContain('"send_email"');
+    expect(browserWranglerConfig).not.toContain('"HONOWARDEN_RESEND_API_KEY"');
+    expect(browserWranglerConfig).toContain('"main": "worker.ts"');
   });
 });
