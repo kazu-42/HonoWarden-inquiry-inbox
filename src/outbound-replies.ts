@@ -5,6 +5,7 @@ import {
   withVerifiedOperator,
 } from "./access-auth";
 import type { InquiryBindings } from "./bindings";
+import { resolveEmailErrorCode } from "./email-errors";
 import { createLinearIssueWorkflow } from "./linear-issues";
 import {
   getOperatorDraft,
@@ -419,7 +420,7 @@ async function sendDraft(
       },
     });
   } catch (error) {
-    providerErrorCode = resolveEmailSendErrorCode(error);
+    providerErrorCode = resolveEmailErrorCode(error, "email_send_failed");
     console.error(
       JSON.stringify({
         event: "inquiry.email_send_failed",
@@ -503,16 +504,6 @@ function sendStateConflictResponse(
     }),
   );
   return jsonResponse({ error: "draft_send_state_conflict" }, 503);
-}
-
-function resolveEmailSendErrorCode(error: unknown): string {
-  if (!isRecord(error) || typeof error.code !== "string") {
-    return "email_send_failed";
-  }
-
-  return /^E_[A-Z0-9_]{1,64}$/.test(error.code)
-    ? error.code
-    : "email_send_failed";
 }
 
 function resolveOperatorIdentity(request: Request): string | null {

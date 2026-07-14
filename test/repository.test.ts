@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   recordInquiryEvent,
   recordInquiryMessage,
+  updateInquiryMessageDeliveryStatus,
   upsertInquiryThread,
 } from "../src/repository";
 import { RecordingD1Database } from "./support/fakes";
@@ -80,5 +81,43 @@ describe("inquiry repository", () => {
 
     expect(database.queries.join("\n")).toContain("INSERT INTO inquiry_events");
     expect(database.boundValues).toContain("receive");
+  });
+
+  it("transitions only a pending forward to a terminal delivery status", async () => {
+    const database = new RecordingD1Database();
+
+    const updated = await updateInquiryMessageDeliveryStatus(
+      database as unknown as D1Database,
+      {
+        id: "message-id",
+        expectedStatus: "forward_pending",
+        status: "forwarded",
+      },
+    );
+
+    expect(updated).toBe(true);
+    expect(database.queries.join("\n")).toContain("UPDATE inquiry_messages");
+    expect(database.queries.join("\n")).toContain("delivery_status = ?");
+    expect(database.queries.join("\n")).toContain("AND delivery_status = ?");
+    expect(database.boundValues).toEqual([
+      "forwarded",
+      "message-id",
+      "forward_pending",
+    ]);
+  });
+
+  it("reports when the pending forward transition did not apply", async () => {
+    const database = new RecordingD1Database(null, [], [0]);
+
+    const updated = await updateInquiryMessageDeliveryStatus(
+      database as unknown as D1Database,
+      {
+        id: "message-id",
+        expectedStatus: "forward_pending",
+        status: "forward_failed",
+      },
+    );
+
+    expect(updated).toBe(false);
   });
 });

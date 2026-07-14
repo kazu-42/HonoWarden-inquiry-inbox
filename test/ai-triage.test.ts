@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { classifyRedactedInquiry, redactTriageText } from "../src/ai-triage";
 import type { InquiryBindings } from "../src/bindings";
-import { RecordingD1Database } from "./support/fakes";
+import { handleInquiryEmail } from "../src/inquiry-mail";
+import {
+  FakeEmailMessage,
+  RecordingD1Database,
+  textEmail,
+} from "./support/fakes";
 
 describe("AI inquiry triage", () => {
   it("redacts private addresses and token-like values before classification", () => {
@@ -35,6 +40,58 @@ describe("AI inquiry triage", () => {
       recommendedAction: "escalate_security",
     });
     expect(result.confidence).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("accepts the sanitized subject stored for an inbound message", async () => {
+    const database = new RecordingD1Database();
+    const message = new FakeEmailMessage(
+      "reporter@example.test",
+      "security@honowarden.com",
+      textEmail({ subject: "Possible   stored XSS" }),
+    );
+    const inbound = await handleInquiryEmail(
+      message,
+      { INQUIRY_DB: database as unknown as D1Database },
+      new Date("2026-07-09T00:00:00.000Z"),
+    );
+    const messageInsert = database.completedRuns.find((run) =>
+      run.query.includes("INSERT INTO inquiry_messages"),
+    );
+    const storedSubject = messageInsert?.boundValues[9];
+
+    expect(storedSubject).toBe("Possible stored XSS");
+    if (
+      typeof storedSubject !== "string" ||
+      !inbound.threadId ||
+      !inbound.messageId
+    ) {
+      throw new Error("expected stored inbound triage fields");
+    }
+
+    const response = await worker.fetch(
+      new Request("https://inbox.example.test/api/triage-runs", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "Cf-Access-Authenticated-User-Email": "operator@example.test",
+        },
+        body: JSON.stringify({
+          threadId: inbound.threadId,
+          messageId: inbound.messageId,
+          mailbox: "security",
+          from: "security@honowarden.com",
+          subject: storedSubject,
+          text: "Possible XSS vulnerability in the stored inquiry.",
+        }),
+      }),
+      { INQUIRY_DB: database as unknown as D1Database } as InquiryBindings,
+    );
+    const draftInsert = database.completedRuns.find((run) =>
+      run.query.includes("INSERT INTO inquiry_drafts"),
+    );
+
+    expect(response.status).toBe(201);
+    expect(draftInsert?.boundValues).toContain("Re: Possible stored XSS");
   });
 
   it("creates redacted triage audit output and a draft suggestion", async () => {

@@ -90,6 +90,7 @@ export class FakeEmailMessage {
     readonly from: string,
     readonly to: string,
     rawMessage: string,
+    private readonly forwardError: unknown | null = null,
   ) {
     this.headers = parseRawHeaders(rawMessage);
     this.raw = new Response(rawMessage).body as ReadableStream;
@@ -101,6 +102,9 @@ export class FakeEmailMessage {
 
   async forward(recipient: string): Promise<void> {
     this.forwardedTo = recipient;
+    if (this.forwardError) {
+      throw this.forwardError;
+    }
   }
 }
 

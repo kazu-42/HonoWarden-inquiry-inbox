@@ -9,9 +9,15 @@ import {
 } from "./support/fakes";
 
 describe("inquiry email handler", () => {
-  it("stores metadata-only records for allowed honowarden.com recipients", async () => {
+  it("stores a sanitized subject preview and sender alongside its hash", async () => {
     const database = new RecordingD1Database();
+    const sender = "reporter@example.test";
+    const senderHash =
+      "e3dd50c20ab8d89027d69880304fd9622b0ff3b7be56acf8f68c8006f5babde7";
+    const subject = `Security   report ${"x".repeat(220)}`;
+    const sanitizedSubject = `Security report ${"x".repeat(220)}`.slice(0, 200);
     const rawMessage = textEmail({
+      subject,
       body: "this private body must not be stored as a bound value",
     });
     const message = new FakeEmailMessage(
@@ -43,12 +49,40 @@ describe("inquiry email handler", () => {
     );
     expect(database.queries.join("\n")).toContain("INSERT INTO inquiry_events");
     expect(database.boundValues).toContain("security");
-    expect(database.boundValues).toContain("reporter@example.test");
+    expect(database.boundValues).toContain(sender);
     expect(database.boundValues).toContain("security@honowarden.com");
     expect(database.boundValues).toContain("2026-08-08T00:00:00.000Z");
     expect(database.boundValues).toContain("stored_metadata");
     expect(database.boundValues).toContain("disabled");
     expect(database.boundValues.join("\n")).not.toContain("private body");
+    const threadInsert = database.completedRuns.find((run) =>
+      run.query.includes("INSERT INTO inquiry_threads"),
+    );
+    const messageInsert = database.completedRuns.find((run) =>
+      run.query.includes("INSERT INTO inquiry_messages"),
+    );
+    expect(threadInsert?.boundValues.slice(3, 6)).toEqual([
+      sender,
+      senderHash,
+      sanitizedSubject,
+    ]);
+    expect(messageInsert?.boundValues.slice(4, 6)).toEqual([
+      sender,
+      senderHash,
+    ]);
+    expect(messageInsert?.boundValues[9]).toBe(sanitizedSubject);
+    expect(messageInsert?.boundValues).toContain("stored_metadata");
+    expect(messageInsert?.boundValues).not.toContain("forward_pending");
+    expect(database.queries.join("\n")).not.toContain(
+      "UPDATE inquiry_messages",
+    );
+    expect(
+      database.completedRuns.some(
+        (run) =>
+          run.query.includes("INSERT INTO inquiry_events") &&
+          run.boundValues.includes("forward"),
+      ),
+    ).toBe(false);
   });
 
   it("forwards accepted metadata-only messages when a destination is configured", async () => {
@@ -71,10 +105,123 @@ describe("inquiry email handler", () => {
     expect(result.status).toBe("forwarded");
     expect(message.forwardedTo).toBe("operator@example.test");
     expect(database.boundValues).toContain("forward_pending");
-    expect(database.boundValues).toContain("forward");
+    const deliveryTransition = database.completedRuns.find((run) =>
+      run.query.includes("UPDATE inquiry_messages"),
+    );
+    expect(deliveryTransition?.boundValues).toEqual([
+      "forwarded",
+      result.messageId,
+      "forward_pending",
+    ]);
+    expect(deliveryTransition?.boundValues[0]).not.toBe("forward_pending");
+    const forwardEvent = database.completedRuns.find(
+      (run) =>
+        run.query.includes("INSERT INTO inquiry_events") &&
+        run.boundValues.includes("forward"),
+    );
+    expect(forwardEvent?.boundValues).toContain("success");
     expect(database.boundValues.join("\n")).not.toContain(
       "operator@example.test",
     );
+  });
+
+  it("persists a terminal forward failure without adding exposure", async () => {
+    const destination = "private-forward-destination@example.test";
+    const sender = "private-envelope-sender@example.test";
+    const subject = "private forward failure subject";
+    const body = "private forward failure body";
+    const providerDetail = "private provider exception detail";
+    const providerError = Object.assign(
+      new Error(
+        `${providerDetail}: ${destination} ${sender} ${subject} ${body}`,
+      ),
+      { code: "E_PROVIDER_UNAVAILABLE" },
+    );
+    const database = new RecordingD1Database();
+    const message = new FakeEmailMessage(
+      sender,
+      "hello@honowarden.com",
+      textEmail({
+        from: `Private Reporter <${sender}>`,
+        to: "hello@honowarden.com",
+        subject,
+        body,
+      }),
+      providerError,
+    );
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const result = await handleInquiryEmail(
+        message,
+        {
+          INQUIRY_DB: database as unknown as D1Database,
+          HONOWARDEN_INQUIRY_FORWARD_TO: destination,
+        },
+        new Date("2026-07-09T00:00:00.000Z"),
+      );
+
+      expect(result.status).toBe("forward_failed");
+      expect(message.forwardedTo).toBe(destination);
+      expect(message.rejectedReason).toBe("message forwarding failed");
+      const deliveryTransition = database.completedRuns.find((run) =>
+        run.query.includes("UPDATE inquiry_messages"),
+      );
+      expect(deliveryTransition?.boundValues).toEqual([
+        "forward_failed",
+        result.messageId,
+        "forward_pending",
+      ]);
+      expect(deliveryTransition?.boundValues[0]).not.toBe("forward_pending");
+      const forwardEvent = database.completedRuns.find(
+        (run) =>
+          run.query.includes("INSERT INTO inquiry_events") &&
+          run.boundValues.includes("forward"),
+      );
+      expect(forwardEvent?.boundValues).toContain("forward_failed");
+      expect(forwardEvent?.boundValues).toContain(
+        JSON.stringify({ errorCode: "E_PROVIDER_UNAVAILABLE" }),
+      );
+      expect(forwardEvent?.boundValues.join("\n")).toMatch(/E_[A-Z0-9_]{1,64}/);
+      expect(errorLog).toHaveBeenCalledWith(
+        JSON.stringify({
+          event: "inquiry.email_forward_failed",
+          providerErrorCode: "E_PROVIDER_UNAVAILABLE",
+        }),
+      );
+
+      const messageInsert = database.completedRuns.find((run) =>
+        run.query.includes("INSERT INTO inquiry_messages"),
+      );
+      expect(messageInsert?.boundValues[4]).toBe(sender);
+      expect(messageInsert?.boundValues[5]).toMatch(/^[a-f0-9]{64}$/);
+      expect(messageInsert?.boundValues[9]).toBe(subject);
+
+      const persisted = database.boundValues.join("\n");
+      const failureEvent = forwardEvent?.boundValues.join("\n") ?? "";
+      const logged = JSON.stringify(errorLog.mock.calls);
+      for (const secret of [
+        destination,
+        body,
+        providerDetail,
+        providerError.message,
+      ]) {
+        expect(persisted).not.toContain(secret);
+      }
+      for (const secret of [
+        destination,
+        sender,
+        subject,
+        body,
+        providerDetail,
+        providerError.message,
+      ]) {
+        expect(failureEvent).not.toContain(secret);
+        expect(logged).not.toContain(secret);
+      }
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("uses mailbox-specific forwarding destinations before the generic fallback", async () => {
