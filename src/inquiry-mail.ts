@@ -2,10 +2,12 @@ import PostalMime from "postal-mime";
 
 import type { InquiryBindings } from "./bindings";
 import { defaultInquiryMailboxes } from "./bindings";
+import { resolveEmailErrorCode } from "./email-errors";
 import {
   findInquiryMessageByMessageIdHash,
   recordInquiryEvent,
   recordInquiryMessage,
+  updateInquiryMessageDeliveryStatus,
   upsertInquiryThread,
 } from "./repository";
 
@@ -22,6 +24,7 @@ export type InquiryEmailResult = {
   status:
     | "stored_metadata"
     | "forwarded"
+    | "forward_failed"
     | "duplicate"
     | "rejected_recipient"
     | "rejected_attachments"
@@ -136,6 +139,7 @@ export async function handleInquiryEmail(
     });
   }
 
+  const forwardTo = resolveForwardRecipient(mailbox, env);
   const stored = await recordInboundMetadata({
     env,
     message,
@@ -143,23 +147,47 @@ export async function handleInquiryEmail(
     raw,
     receivedAt,
     retentionDeleteAfter,
-    deliveryStatus: resolveForwardRecipient(mailbox, env)
-      ? "forward_pending"
-      : "stored_metadata",
+    deliveryStatus: forwardTo ? "forward_pending" : "stored_metadata",
     attachmentCount: 0,
     attachmentPolicy: "rejected",
     parsed,
   });
 
-  const forwardTo = resolveForwardRecipient(mailbox, env);
   if (forwardTo) {
-    await message.forward(forwardTo);
-    await recordInquiryEvent(env.INQUIRY_DB, {
-      id: crypto.randomUUID(),
-      threadId: stored.threadId,
-      messageId: stored.messageId,
-      eventType: "forward",
-      status: "success",
+    try {
+      await message.forward(forwardTo);
+    } catch (error) {
+      const providerErrorCode = resolveEmailErrorCode(
+        error,
+        "E_EMAIL_FORWARD_FAILED",
+      );
+      message.setReject("message forwarding failed");
+      await recordForwardOutcome({
+        env,
+        stored,
+        status: "forward_failed",
+        metadataJson: JSON.stringify({ errorCode: providerErrorCode }),
+        occurredAt: receivedAt,
+      });
+      console.error(
+        JSON.stringify({
+          event: "inquiry.email_forward_failed",
+          providerErrorCode,
+        }),
+      );
+
+      return {
+        status: "forward_failed",
+        mailbox,
+        messageId: stored.messageId,
+        threadId: stored.threadId,
+      };
+    }
+
+    await recordForwardOutcome({
+      env,
+      stored,
+      status: "forwarded",
       metadataJson: JSON.stringify({ recipient: "configured_destination" }),
       occurredAt: receivedAt,
     });
@@ -178,6 +206,42 @@ export async function handleInquiryEmail(
     messageId: stored.messageId,
     threadId: stored.threadId,
   };
+}
+
+async function recordForwardOutcome(input: {
+  env: InquiryBindings;
+  stored: { threadId: string; messageId: string };
+  status: "forwarded" | "forward_failed";
+  metadataJson: string;
+  occurredAt: string;
+}): Promise<void> {
+  const transitioned = await updateInquiryMessageDeliveryStatus(
+    input.env.INQUIRY_DB,
+    {
+      id: input.stored.messageId,
+      expectedStatus: "forward_pending",
+      status: input.status,
+    },
+  );
+  if (!transitioned) {
+    console.error(
+      JSON.stringify({
+        event: "inquiry.email_forward_state_conflict",
+        targetStatus: input.status,
+      }),
+    );
+    throw new Error("inquiry_email_forward_state_conflict");
+  }
+
+  await recordInquiryEvent(input.env.INQUIRY_DB, {
+    id: crypto.randomUUID(),
+    threadId: input.stored.threadId,
+    messageId: input.stored.messageId,
+    eventType: "forward",
+    status: input.status === "forwarded" ? "success" : "forward_failed",
+    metadataJson: input.metadataJson,
+    occurredAt: input.occurredAt,
+  });
 }
 
 async function recordRejectedMessage(input: {

@@ -43,6 +43,12 @@ export type InquiryEventInput = {
   occurredAt: string;
 };
 
+export type InquiryMessageDeliveryStatusUpdateInput = {
+  id: string;
+  expectedStatus: "forward_pending";
+  status: "forwarded" | "forward_failed";
+};
+
 export type InquiryDraftInput = {
   id: string;
   threadId: string;
@@ -336,6 +342,25 @@ export async function recordInquiryMessage(
       input.createdAt,
     )
     .run();
+}
+
+export async function updateInquiryMessageDeliveryStatus(
+  database: InquiryDatabase,
+  input: InquiryMessageDeliveryStatusUpdateInput,
+): Promise<boolean> {
+  const result = await database
+    .prepare(
+      `
+        UPDATE inquiry_messages
+        SET delivery_status = ?
+        WHERE id = ?
+        AND delivery_status = ?
+      `,
+    )
+    .bind(input.status, input.id, input.expectedStatus)
+    .run();
+
+  return result.meta.changes === 1;
 }
 
 export async function recordInquiryEvent(
