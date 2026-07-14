@@ -5,7 +5,6 @@ import {
   withVerifiedOperator,
 } from "./access-auth";
 import type { InquiryBindings } from "./bindings";
-import { resolveEmailErrorCode } from "./email-errors";
 import { createLinearIssueWorkflow } from "./linear-issues";
 import {
   getOperatorDraft,
@@ -13,6 +12,7 @@ import {
   listOperatorDrafts,
 } from "./operator-queue";
 import { operatorQueuePageResponse } from "./operator-ui";
+import { sendViaResend } from "./resend-client";
 import {
   getInquiryDraft,
   recordInquiryDraft,
@@ -384,8 +384,8 @@ async function sendDraft(
   if (draft.toAddress === pendingTriageRecipient) {
     return jsonResponse({ error: "draft_recipient_required" }, 409);
   }
-  if (!env.EMAIL) {
-    return jsonResponse({ error: "email_binding_missing" }, 503);
+  if (!env.HONOWARDEN_RESEND_API_KEY) {
+    return jsonResponse({ error: "email_not_configured" }, 503);
   }
 
   const sentAt = now.toISOString();
@@ -404,23 +404,24 @@ async function sendDraft(
 
   const acquiredVersion = version + 1;
   const eventType = mode === "send" ? "draft_send" : "draft_send_retry";
-  let result: EmailSendResult | null = null;
-  let providerErrorCode: string | null = null;
+  const outcome = await sendViaResend(env.HONOWARDEN_RESEND_API_KEY, {
+    to: draft.toAddress,
+    from: draft.fromAddress,
+    replyTo: draft.replyToAddress,
+    subject: draft.subject,
+    text: draft.textBody,
+    headers: {
+      "X-HonoWarden-Inquiry-Thread": draft.threadId,
+      "X-HonoWarden-Inquiry-Draft": draft.id,
+    },
+  });
 
-  try {
-    result = await env.EMAIL.send({
-      to: draft.toAddress,
-      from: draft.fromAddress,
-      replyTo: draft.replyToAddress,
-      subject: draft.subject,
-      text: draft.textBody,
-      headers: {
-        "X-HonoWarden-Inquiry-Thread": draft.threadId,
-        "X-HonoWarden-Inquiry-Draft": draft.id,
-      },
-    });
-  } catch (error) {
-    providerErrorCode = resolveEmailErrorCode(error, "email_send_failed");
+  let providerErrorCode: string | null = null;
+  let providerMessageId: string | null = null;
+  if (outcome.ok) {
+    providerMessageId = outcome.messageId;
+  } else {
+    providerErrorCode = outcome.code;
     console.error(
       JSON.stringify({
         event: "inquiry.email_send_failed",
@@ -458,8 +459,8 @@ async function sendDraft(
     return jsonResponse({ error: "email_send_failed" }, 502);
   }
 
-  const providerMessageIdHash = result?.messageId
-    ? await sha256Hex(result.messageId)
+  const providerMessageIdHash = providerMessageId
+    ? await sha256Hex(providerMessageId)
     : null;
   const completed = await updateInquiryDraftStatus(env.INQUIRY_DB, {
     id: draft.id,

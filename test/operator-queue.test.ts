@@ -374,12 +374,16 @@ describe("inquiry operator queue read API", () => {
     const retryable = queueRow("send_failed", 0, {
       last_error_code: "E_PROVIDER_UNAVAILABLE",
     });
-    const nonRetryable = queueRow("send_failed", 1, {
+    const rateLimited = queueRow("send_failed", 1, {
+      last_error_code: "E_PROVIDER_RATE_LIMITED",
+    });
+    const nonRetryable = queueRow("send_failed", 2, {
       last_error_code: "E_SENDER_DOMAIN_NOT_AVAILABLE",
     });
 
     for (const [row, expected] of [
       [retryable, true],
+      [rateLimited, true],
       [nonRetryable, false],
     ] as const) {
       const response = await worker.fetch(
